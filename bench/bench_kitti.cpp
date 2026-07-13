@@ -176,3 +176,67 @@ static void frame_validate_100(benchmark::State &state) {
     state.SetItemsProcessed(state.iterations() * 100);
 }
 BENCHMARK(frame_validate_100)->Unit(benchmark::kMillisecond);
+
+// Load every real KITTI Velodyne frame once (outside the timed loop).
+// Returns an empty vector when the dataset is absent.
+namespace {
+    std::vector<io::lidar::LidarFrame> load_real_lidar_frames() {
+        const std::filesystem::path dir = kitti_root() / "velodyne_points" / "data";
+        if (count_files(dir, ".bin") == 0) return {};
+        io::lidar::LidarSequenceStats stats;
+        return io::lidar::kitti_lidar_reader::read_sequence(dir, stats);
+    }
+}
+
+// Real KITTI RANSAC ground extraction over every frame in the sequence.
+// Reports median ms/frame (items_per_second) and mean ground_ratio.
+static void ground_extraction_real(benchmark::State &state) {
+    auto frames = load_real_lidar_frames();
+    if (frames.empty()) {
+        state.SkipWithError("[SKIP] Real KITTI benchmarks: path not found");
+        return;
+    }
+    geometry::lidar::ground_extractor ge;
+    double ratio_sum = 0.0;
+    std::size_t ratio_n = 0;
+    for (auto _ : state) {
+        for (const auto &f : frames) {
+            auto g = ge.extract(f);
+            benchmark::DoNotOptimize(g.ground_ratio);
+            ratio_sum += g.ground_ratio;
+            ++ratio_n;
+        }
+    }
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(frames.size()));
+    state.counters["mean_ground_ratio"] =
+            ratio_n ? ratio_sum / static_cast<double>(ratio_n) : 0.0;
+    state.counters["frames"] = static_cast<double>(frames.size());
+}
+BENCHMARK(ground_extraction_real)->Unit(benchmark::kMillisecond);
+
+// Real KITTI 8-check frame validation over every frame in the sequence.
+// Reports frames/sec (items_per_second) and pass_count / total_count.
+static void frame_validate_real(benchmark::State &state) {
+    auto frames = load_real_lidar_frames();
+    if (frames.empty()) {
+        state.SkipWithError("[SKIP] Real KITTI benchmarks: path not found");
+        return;
+    }
+    geometry::lidar::frame_validator fv;
+    std::size_t pass_count = 0;
+    std::size_t total_count = 0;
+    for (auto _ : state) {
+        for (const auto &f : frames) {
+            // Real KITTI has no CRC sidecars, so don't require CRC here.
+            auto r = fv.validate(f, /*expect_crc=*/false);
+            benchmark::DoNotOptimize(r.validation_pass);
+            if (r.validation_pass) ++pass_count;
+            ++total_count;
+        }
+    }
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(frames.size()));
+    state.counters["pass_count"] = static_cast<double>(pass_count);
+    state.counters["total_count"] = static_cast<double>(total_count);
+    state.counters["frames"] = static_cast<double>(frames.size());
+}
+BENCHMARK(frame_validate_real)->Unit(benchmark::kMillisecond);
