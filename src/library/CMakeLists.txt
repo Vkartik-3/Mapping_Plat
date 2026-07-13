@@ -28,6 +28,7 @@ target_sources(library
         src/geometry/centerline/centerline_extractor.cpp
         src/geometry/road_graph/osm_importer.cpp
         src/geometry/road_graph/map_matcher.cpp
+        src/geometry/lidar/ground_extractor.cpp
         src/io/csv_importer.cpp
         src/io/file_exporter.cpp
         src/io/importer.cpp
@@ -149,7 +150,8 @@ target_include_directories(library
 target_include_directories(library SYSTEM
         PUBLIC
         ${GPX_INCLUDE_DIR}
-        ${OSMIUM_INCLUDE_DIRS})
+        ${OSMIUM_INCLUDE_DIRS}
+        ${CMAKE_SOURCE_DIR}/third_party/nanoflann/include)
 
 target_link_libraries(library
         PUBLIC
