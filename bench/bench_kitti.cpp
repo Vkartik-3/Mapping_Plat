@@ -6,9 +6,11 @@
 #include <benchmark/benchmark.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <string>
 #include <vector>
 
 #include "types/io/track/kitti_oxts_importer.hpp"
@@ -46,6 +48,31 @@ namespace {
         return raw;
     }
 
+    // Compile-time default location of the real KITTI raw sequence on EC2.
+#ifndef KITTI_DEFAULT_PATH
+#define KITTI_DEFAULT_PATH \
+    "/home/ubuntu/kitti/2011_09_26/2011_09_26/2011_09_26_drive_0001_sync/"
+#endif
+
+    // Root of the KITTI sequence: KITTI_PATH env var overrides the default.
+    std::filesystem::path kitti_root() {
+        if (const char *env = std::getenv("KITTI_PATH"); env && *env) {
+            return std::filesystem::path(env);
+        }
+        return std::filesystem::path(KITTI_DEFAULT_PATH);
+    }
+
+    // Count *.<ext> files in dir, or 0 if the directory is absent.
+    std::size_t count_files(const std::filesystem::path &dir, const std::string &ext) {
+        namespace fs = std::filesystem;
+        if (!fs::exists(dir) || !fs::is_directory(dir)) return 0;
+        std::size_t n = 0;
+        for (const auto &e : fs::directory_iterator(dir)) {
+            if (e.is_regular_file() && e.path().extension() == ext) ++n;
+        }
+        return n;
+    }
+
 }
 
 static void kitti_oxts_parse(benchmark::State &state) {
@@ -57,6 +84,23 @@ static void kitti_oxts_parse(benchmark::State &state) {
     state.SetItemsProcessed(state.iterations() * state.range(0));
 }
 BENCHMARK(kitti_oxts_parse)->Arg(200);
+
+// Real KITTI OXTS: parse every frame in the sequence's oxts/data directory.
+// Skips cleanly (no crash) when the dataset is not present on this machine.
+static void kitti_oxts_parse_real(benchmark::State &state) {
+    const std::filesystem::path dir = kitti_root() / "oxts" / "data";
+    const std::size_t frames = count_files(dir, ".txt");
+    if (frames == 0) {
+        state.SkipWithError("[SKIP] Real KITTI benchmarks: path not found");
+        return;
+    }
+    for (auto _ : state) {
+        auto seq = io::track::kitti_oxts_importer::load_sequence(dir);
+        benchmark::DoNotOptimize(seq.frames_parsed);
+    }
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(frames));
+}
+BENCHMARK(kitti_oxts_parse_real);
 
 static void kitti_lidar_read_1k(benchmark::State &state) {
     // Prepare 1000 small .bin frames on disk once.
@@ -80,6 +124,24 @@ static void kitti_lidar_read_1k(benchmark::State &state) {
     state.SetItemsProcessed(state.iterations() * 1000);
 }
 BENCHMARK(kitti_lidar_read_1k)->Unit(benchmark::kMillisecond);
+
+// Real KITTI Velodyne: read every .bin frame in velodyne_points/data.
+// Skips cleanly (no crash) when the dataset is not present on this machine.
+static void kitti_lidar_read_real(benchmark::State &state) {
+    const std::filesystem::path dir = kitti_root() / "velodyne_points" / "data";
+    const std::size_t frames = count_files(dir, ".bin");
+    if (frames == 0) {
+        state.SkipWithError("[SKIP] Real KITTI benchmarks: path not found");
+        return;
+    }
+    for (auto _ : state) {
+        io::lidar::LidarSequenceStats stats;
+        auto read = io::lidar::kitti_lidar_reader::read_sequence(dir, stats);
+        benchmark::DoNotOptimize(stats.frames_read);
+    }
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(frames));
+}
+BENCHMARK(kitti_lidar_read_real)->Unit(benchmark::kMillisecond);
 
 static void crc32_1frame(benchmark::State &state) {
     auto frame = util::synthetic::lidar_frame(120000, 0, -1.7f, 0, 5);
