@@ -25,6 +25,9 @@ target_sources(library
         src/io/track/track_exporter.cpp
         src/types/io/track/kitti_oxts_importer.cpp
         src/types/io/lidar/kitti_lidar_reader.cpp
+        src/geometry/centerline/centerline_extractor.cpp
+        src/geometry/road_graph/osm_importer.cpp
+        src/geometry/road_graph/map_matcher.cpp
         src/io/csv_importer.cpp
         src/io/file_exporter.cpp
         src/io/importer.cpp
