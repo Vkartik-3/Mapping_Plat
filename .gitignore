@@ -1,0 +1,6 @@
+.idea/
+cmake-*/
+run/
+cmake.lock
+**/*.osm.pbf
+**/*.AppImage

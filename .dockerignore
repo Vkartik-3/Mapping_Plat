@@ -1,0 +1,8 @@
+.idea
+.git
+.gitignore
+.dockerignore
+cmake-*
+cmake.lock
+data
+run
