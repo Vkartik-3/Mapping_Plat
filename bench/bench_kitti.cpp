@@ -201,12 +201,16 @@ static void ground_extraction_real(benchmark::State &state) {
     // Dataset-level counter computed ONCE over a single pass, into an
     // initialized double. This is independent of Google Benchmark's iteration
     // count and identical across every invocation, so it aggregates cleanly.
+    // NB: do NOT wrap g.ground_ratio in benchmark::DoNotOptimize here. The
+    // non-const lvalue overload uses an "+m,r" (read-write) asm constraint, so
+    // the compiler may write back into the field; the value is consumed by the
+    // sum below (no elision risk), so the barrier is both unnecessary and
+    // unsafe in this statistics pass.
     double mean_ground_ratio = 0.0;
     {
         double ratio_sum = 0.0;
         for (const auto &f : frames) {
             auto g = ge.extract(f);
-            benchmark::DoNotOptimize(g.ground_ratio);
             ratio_sum += g.ground_ratio;
         }
         mean_ground_ratio = ratio_sum / static_cast<double>(frames.size());
@@ -244,8 +248,9 @@ static void frame_validate_real(benchmark::State &state) {
         std::size_t passed = 0;
         for (const auto &f : frames) {
             // Real KITTI has no CRC sidecars, so don't require CRC here.
+            // No DoNotOptimize: validation_pass is read just below, and the
+            // read-write barrier overload could clobber it (see note above).
             auto r = fv.validate(f, /*expect_crc=*/false);
-            benchmark::DoNotOptimize(r.validation_pass);
             if (r.validation_pass) ++passed;
         }
         pass_count = static_cast<double>(passed);
