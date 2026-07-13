@@ -1,3 +1,30 @@
+---
+## Attribution and Project Status
+
+This project is built on top of map-matching-2
+(https://github.com/addy90/map-matching-2) and 
+MapsHD/HDMapping (https://github.com/MapsHD/HDMapping).
+Licensed under their respective licenses.
+
+## Planned Extensions by Kartik Vadhawana
+
+- KITTI raw data reader (OXTS GPS/IMU + Velodyne .bin)
+- Road centerline extraction from GPS traces
+- Road network graph from KITTI + OSM (C++20)
+- nanoflann k-d tree spatial index on point clouds
+- LiDAR frame integrity validation (CRC32)
+- Google Benchmark harness (ingestion, query latency, 
+  graph construction time)
+- GoogleTest suite (15+ tests)
+- GitHub Actions CI
+- Python visualization (folium road network + 
+  matplotlib point cloud)
+
+## Contributions by Kartik Vadhawana
+
+Completed extensions listed here after implementation.
+---
+
 # Map Matching 2
 
 ## High Performance Map Matching with Markov Decision Processes (MDPs) and Hidden Markov Models (HMMs)

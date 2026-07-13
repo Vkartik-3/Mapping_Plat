@@ -23,6 +23,8 @@ target_sources(library
         src/geometry/srs.cpp
         src/io/memory_mapped/utils.cpp
         src/io/track/track_exporter.cpp
+        src/types/io/track/kitti_oxts_importer.cpp
+        src/types/io/lidar/kitti_lidar_reader.cpp
         src/io/csv_importer.cpp
         src/io/file_exporter.cpp
         src/io/importer.cpp
