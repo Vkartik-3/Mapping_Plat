@@ -1,6 +1,3 @@
-[submodule "third_party/hdmapping"]
-	path = third_party/hdmapping
-	url = https://github.com/MapsHD/HDMapping.git
 [submodule "third_party/nanoflann"]
 	path = third_party/nanoflann
 	url = https://github.com/jlblancoc/nanoflann.git
