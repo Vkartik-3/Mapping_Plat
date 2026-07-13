@@ -1,0 +1,85 @@
+name: HD Map Pipeline CI
+
+# Builds and tests the pipeline extensions (Phases 1-4). These targets are
+# self-contained (KITTI ingestion, road graph, LiDAR, k-d tree) and compile
+# against the bundled googletest / benchmark / nanoflann submodules without
+# the heavy Boost/Osmium stack, so CI stays fast and hermetic.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build (Ubuntu 22.04, Release)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install CMake
+        uses: lukka/get-cmake@latest
+      - name: Configure and build tests
+        run: |
+          cmake -S test -B build/test -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/test -j
+      - name: Configure and build benchmarks
+        run: |
+          cmake -S bench -B build/bench -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/bench -j
+
+  test:
+    name: GoogleTest suite
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install CMake
+        uses: lukka/get-cmake@latest
+      - name: Build and run tests
+        run: |
+          cmake -S test -B build/test -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/test -j
+          ctest --test-dir build/test --output-on-failure
+
+  bench:
+    name: Benchmarks (upload results)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install CMake
+        uses: lukka/get-cmake@latest
+      - name: Build and run benchmarks
+        run: |
+          cmake -S bench -B build/bench -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/bench -j
+          ./build/bench/hdmap_bench --benchmark_min_time=0.2s \
+            --benchmark_format=json | tee benchmark_results.json
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark_results.json
+
+  asan:
+    name: AddressSanitizer + UBSan
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install CMake
+        uses: lukka/get-cmake@latest
+      - name: Build tests with sanitizers and run
+        run: |
+          cmake -S test -B build/asan -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build build/asan -j
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
+            ctest --test-dir build/asan --output-on-failure

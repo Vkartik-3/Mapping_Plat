@@ -22,7 +22,24 @@ Licensed under their respective licenses.
 
 ## Contributions by Kartik Vadhawana
 
-Completed extensions listed here after implementation.
+Completed (native C++20, built on the map-matching-2 tree):
+
+- **KITTI ingestion** — OXTS GPS/IMU reader with Haversine ENU conversion,
+  Velodyne `.bin` reader, header-only CRC32 (0xEDB88320) integrity checking,
+  and a synchronized OXTS↔LiDAR sequence store.
+- **Road network from GPS + OSM** — GPS-trace centerline extraction
+  (Schroedl/Biagioni heading-bin clustering), a dependency-free OSM XML road
+  importer with binary serialization, and an HMM/Viterbi map matcher
+  (Newson-Krumm) that snaps trajectories to the road graph.
+- **Spatial index + LiDAR validation** — nanoflann 3D k-d tree wrapper
+  (NN / kNN / radius), RANSAC ground-plane extraction, and an 8-check
+  LiDAR frame integrity validator. Dijkstra routing on the road graph.
+- **Benchmarks, tests, CI, viz** — Google Benchmark harness (11 benchmarks),
+  GoogleTest suite (39 tests), GitHub Actions CI (build / test / bench /
+  ASan+UBSan), and Python folium/matplotlib visualization.
+
+All extension targets build without the upstream Boost/Osmium stack via the
+self-contained `test/` and `bench/` CMake projects.
 ---
 
 # Map Matching 2
