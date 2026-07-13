@@ -27,14 +27,18 @@ namespace map_matching_2::geometry::lidar {
         std::uint64_t seed = 42;           // deterministic sampling for tests
     };
 
+    // Plain-old-data result: all scalar members, so the type is standard-layout
+    // and trivially copyable. This guarantees a single, fixed ABI/offset layout
+    // across every translation unit, compiler and standard library — a
+    // std::vector<bool> (or any stdlib container) member would make the struct
+    // non-standard-layout and its return-by-value ABI stdlib-dependent, which
+    // can corrupt scalar reads across a TU/ABI boundary.
     struct GroundResult {
         double a = 0.0, b = 0.0, c = 0.0, d = 0.0; // plane coefficients (normal a,b,c)
         double plane_height = 0.0;                 // signed distance of origin to plane
+        double ground_ratio = 0.0;                 // inliers / total
         std::size_t inlier_count = 0;
         std::size_t outlier_count = 0;
-        double ground_ratio = 0.0;                 // inliers / total
-        // classification[i] == true  => ground (inlier), false => obstacle
-        std::vector<bool> classification;
         bool success = false;                      // a plane was found
     };
 

@@ -67,15 +67,11 @@ namespace map_matching_2::geometry::lidar {
             return best;
         }
 
-        // Final classification against the best plane.
-        best.classification.assign(points.size(), false);
+        // Final inlier count against the best plane.
         std::size_t inliers = 0;
-        for (std::size_t i = 0; i < points.size(); ++i) {
-            const auto &p = points[i];
+        for (const auto &p : points) {
             const double dist = std::fabs(best.a * p.x + best.b * p.y + best.c * p.z + best.d);
-            const bool ground = dist <= thr;
-            best.classification[i] = ground;
-            if (ground) ++inliers;
+            if (dist <= thr) ++inliers;
         }
         best.inlier_count = inliers;
         best.outlier_count = points.size() - inliers;
