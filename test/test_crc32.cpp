@@ -1,6 +1,10 @@
 // Copyright (C) 2025 Kartik Vadhawana
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <string>
+#include <string_view>
+
 #include "util/crc32.hpp"
 
 using map_matching_2::util::crc32;

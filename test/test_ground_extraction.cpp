@@ -1,6 +1,9 @@
 // Copyright (C) 2025 Kartik Vadhawana
 #include <gtest/gtest.h>
 
+#include <cmath>
+#include <random>
+
 #include "geometry/lidar/ground_extractor.hpp"
 #include "util/synthetic_data.hpp"
 

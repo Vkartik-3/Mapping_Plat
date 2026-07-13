@@ -1,10 +1,13 @@
 // Copyright (C) 2025 Kartik Vadhawana
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "types/io/track/kitti_oxts_importer.hpp"
