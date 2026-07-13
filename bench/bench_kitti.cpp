@@ -197,19 +197,30 @@ static void ground_extraction_real(benchmark::State &state) {
         return;
     }
     geometry::lidar::ground_extractor ge;
-    double ratio_sum = 0.0;
-    std::size_t ratio_n = 0;
-    for (auto _ : state) {
+
+    // Dataset-level counter computed ONCE over a single pass, into an
+    // initialized double. This is independent of Google Benchmark's iteration
+    // count and identical across every invocation, so it aggregates cleanly.
+    double mean_ground_ratio = 0.0;
+    {
+        double ratio_sum = 0.0;
         for (const auto &f : frames) {
             auto g = ge.extract(f);
             benchmark::DoNotOptimize(g.ground_ratio);
             ratio_sum += g.ground_ratio;
-            ++ratio_n;
+        }
+        mean_ground_ratio = ratio_sum / static_cast<double>(frames.size());
+    }
+
+    // Timed performance loop (does not touch the counters).
+    for (auto _ : state) {
+        for (const auto &f : frames) {
+            auto g = ge.extract(f);
+            benchmark::DoNotOptimize(g.ground_ratio);
         }
     }
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(frames.size()));
-    state.counters["mean_ground_ratio"] =
-            ratio_n ? ratio_sum / static_cast<double>(ratio_n) : 0.0;
+    state.counters["mean_ground_ratio"] = mean_ground_ratio;
     state.counters["frames"] = static_cast<double>(frames.size());
 }
 BENCHMARK(ground_extraction_real)->Unit(benchmark::kMillisecond);
@@ -223,20 +234,34 @@ static void frame_validate_real(benchmark::State &state) {
         return;
     }
     geometry::lidar::frame_validator fv;
-    std::size_t pass_count = 0;
-    std::size_t total_count = 0;
-    for (auto _ : state) {
+
+    // Dataset-level counters computed ONCE over a single pass. total_count
+    // therefore equals the number of frames (108 for this sequence), never a
+    // multiple of Google Benchmark's iteration count.
+    double pass_count = 0.0;
+    double total_count = 0.0;
+    {
+        std::size_t passed = 0;
         for (const auto &f : frames) {
             // Real KITTI has no CRC sidecars, so don't require CRC here.
             auto r = fv.validate(f, /*expect_crc=*/false);
             benchmark::DoNotOptimize(r.validation_pass);
-            if (r.validation_pass) ++pass_count;
-            ++total_count;
+            if (r.validation_pass) ++passed;
+        }
+        pass_count = static_cast<double>(passed);
+        total_count = static_cast<double>(frames.size());
+    }
+
+    // Timed performance loop (does not touch the counters).
+    for (auto _ : state) {
+        for (const auto &f : frames) {
+            auto r = fv.validate(f, /*expect_crc=*/false);
+            benchmark::DoNotOptimize(r.validation_pass);
         }
     }
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(frames.size()));
-    state.counters["pass_count"] = static_cast<double>(pass_count);
-    state.counters["total_count"] = static_cast<double>(total_count);
+    state.counters["pass_count"] = pass_count;
+    state.counters["total_count"] = total_count;
     state.counters["frames"] = static_cast<double>(frames.size());
 }
 BENCHMARK(frame_validate_real)->Unit(benchmark::kMillisecond);
