@@ -1,51 +1,110 @@
 # HD Map Pipeline
 
-**A high-performance C++20 pipeline for HD-map and sensor-data engineering: GPS/IMU
+**A high-performance C++20 pipeline for HD-map and sensor-data engineering — GPS/IMU
 trajectory analysis, road-network graph construction, LiDAR point-cloud
-processing, sensor-data integrity validation, and reproducible benchmarking —
-validated end-to-end on the real KITTI raw dataset.**
+processing, sensor-data integrity validation, spatial indexing, and reproducible
+benchmarking — validated end-to-end on the real KITTI autonomous-driving dataset.**
 
-The pipeline ingests raw autonomous-driving sensor logs (KITTI OXTS GPS/IMU +
-Velodyne LiDAR), turns GPS traces into road geometry, matches trajectories onto a
-road-network graph, indexes and validates 3D point clouds, and measures every
-stage with a real-numbers benchmark harness and a GoogleTest suite.
+It ingests raw self-driving sensor logs (KITTI OXTS GPS/IMU + Velodyne LiDAR),
+turns GPS traces into road geometry, matches trajectories onto a road-network
+graph, indexes and validates 3D point clouds, and measures every stage with a
+real-numbers benchmark harness, a GoogleTest suite, continuous integration, and
+Python visualization.
+
+> **Keywords:** HD maps · autonomous driving · SLAM-adjacent mapping · KITTI raw
+> dataset · OXTS GPS/IMU · Velodyne LiDAR · point cloud · ENU / Haversine ·
+> road-network graph · OpenStreetMap · centerline extraction · map matching ·
+> Hidden Markov Model · Viterbi · Newson–Krumm · Schroedl / Biagioni · RANSAC
+> ground segmentation · nanoflann · k-d tree · nearest-neighbour search · CRC32 ·
+> data integrity · Dijkstra · C++20 · CMake · Google Benchmark · GoogleTest ·
+> GitHub Actions CI · AddressSanitizer · UBSan · GDB · folium · matplotlib.
 
 ---
 
 ## Table of contents
 
+- [Why this matters (impact)](#why-this-matters-impact)
 - [What it does](#what-it-does)
+- [Technology stack](#technology-stack)
 - [Architecture](#architecture)
-- [Components](#components)
+- [Components in detail](#components-in-detail)
+- [Algorithms & math](#algorithms--math)
+- [Data formats](#data-formats)
 - [Building](#building)
 - [Running](#running)
 - [Results (real KITTI)](#results-real-kitti)
-- [Engineering notes & notable issues](#engineering-notes--notable-issues)
+- [Testing, sanitizers & CI](#testing-sanitizers--ci)
+- [Engineering war stories — every bug and how it was solved](#engineering-war-stories--every-bug-and-how-it-was-solved)
+- [Where it was built and run](#where-it-was-built-and-run)
 - [Repository layout](#repository-layout)
+- [Roadmap](#roadmap)
 - [License & attribution](#license--attribution)
+
+---
+
+## Why this matters (impact)
+
+HD (high-definition) maps are the backbone of autonomous driving: a self-driving
+stack needs centimetre-accurate road geometry, a routable road-network graph, and
+absolute trust in the sensor data those maps are built from. This project builds
+the ingestion-to-map core of that workflow and the quality gates around it:
+
+- **Turning raw drives into maps.** GPS/IMU traces become road centerlines and a
+  routable graph; trajectories are snapped onto that graph with confidence
+  scores. This is the "trajectory data mining" that HD-map teams do at fleet
+  scale.
+- **Trusting the sensors.** Every LiDAR frame is CRC-checked and run through an
+  eight-point integrity validator (point count, NaN/Inf, range, angular coverage,
+  intensity distribution, ground-plane sanity) — because a map built on corrupt
+  frames is worse than no map.
+- **Doing it fast and provably.** Ingestion, graph construction, spatial queries,
+  and validation are all benchmarked with real numbers on the real KITTI dataset,
+  not estimates — so performance regressions are visible, not hidden.
+
+The capabilities line up directly with the work of HD-mapping / sensor-fusion
+teams (e.g. NVIDIA DeepMap–style road-network extraction, sensor-data validation,
+and 2D/3D map benchmarking).
 
 ---
 
 ## What it does
 
-The work maps directly onto the core problems of HD-mapping / sensor-fusion teams:
-
 | Capability | Implementation |
 |---|---|
 | GPS/IMU trajectory analysis | KITTI OXTS reader → local ENU frame (Haversine), IMU + accuracy fields |
-| Road centerline extraction | Trace-clustering (Schroedl / Biagioni) on GPS heading + proximity |
-| Road-network graph construction | OSM `.osm` → attributed road graph (length, speed, class, polyline) |
-| Map matching (trace → map) | HMM / Viterbi matcher (Newson–Krumm) snapping GPS onto the graph |
+| Road centerline extraction | Trace-clustering (Schroedl / Biagioni) on GPS heading + spatial proximity |
+| Road-network graph construction | OSM `.osm` → attributed graph (length, speed, class, polyline) + binary I/O |
+| Map matching (trace → map) | HMM / Viterbi (Newson–Krumm) snapping GPS onto the road graph |
+| Routing | Dijkstra shortest path + nearest-edge spatial query |
 | Efficient spatial retrieval | nanoflann 3D k-d tree (NN / kNN / radius) over point clouds |
-| LiDAR processing | RANSAC ground-plane extraction + ground/obstacle classification |
-| Sensor-data integrity | CRC32 per-frame checks + an 8-check LiDAR frame validator |
-| Storage & I/O | Binary road-graph serialization; KITTI Velodyne `.bin` decode |
-| Benchmarking | Google Benchmark harness (15 benchmarks, incl. real-KITTI runs) |
-| Visualization | Python (folium road network, matplotlib point cloud) |
+| LiDAR ground segmentation | RANSAC plane fitting → ground/obstacle classification |
+| Sensor-data integrity | CRC32 per frame + an 8-check LiDAR frame validator |
+| Storage & I/O | Velodyne `.bin` decode; binary road-graph serialization |
+| Benchmarking | Google Benchmark harness — 15 benchmarks, incl. real-KITTI runs |
+| Testing & CI | 39 GoogleTests; GitHub Actions (build / test / bench / ASan+UBSan) |
+| Visualization | Python — folium road network, matplotlib point cloud |
 
-Everything is native **C++20**, `std`-only in the hot paths (no heavy runtime
-dependencies), and builds without the upstream matching engine's Boost/Osmium
-stack via self-contained `test/` and `bench/` CMake projects.
+Everything in the hot paths is native **C++20**, `std`-only (no heavy runtime
+dependencies), and the `test/` and `bench/` projects build **without** the
+upstream matching engine's Boost/Osmium stack.
+
+---
+
+## Technology stack
+
+| Area | Technologies |
+|---|---|
+| Languages | **C++20**, Python 3 |
+| Build | **CMake** (self-contained `test/` and `bench/` projects) |
+| Spatial / math | **nanoflann** (k-d tree), Boost.Geometry R*-tree (upstream engine), ENU/Haversine geodesy |
+| Algorithms | RANSAC, Hidden Markov Model + Viterbi (Newson–Krumm), Schroedl/Biagioni trace clustering, Dijkstra, CRC32 (`0xEDB88320`) |
+| Testing | **GoogleTest** (39 tests) |
+| Benchmarking | **Google Benchmark** (JSON + console, real-KITTI + synthetic) |
+| CI / quality | **GitHub Actions**, **AddressSanitizer**, **UndefinedBehaviorSanitizer**, `-Wall -Wextra` |
+| Debugging | **GDB** (hardware watchpoints), `nm`, `readelf`, preprocessor/ABI inspection |
+| Data | **KITTI** raw (OXTS + Velodyne), **OpenStreetMap** XML |
+| Visualization | folium, matplotlib, numpy |
+| Compilers exercised | GCC 13.3 (Ubuntu/EC2), Apple clang (macOS), GCC 11/12 (GitHub CI) |
 
 ---
 
@@ -53,7 +112,7 @@ stack via self-contained `test/` and `bench/` CMake projects.
 
 ```
                          KITTI raw sequence (2011_09_26_drive_XXXX_sync)
-                          ├── oxts/data/*.txt        (GPS/IMU, 10 Hz)
+                          ├── oxts/data/*.txt             (GPS/IMU, 10 Hz)
                           └── velodyne_points/data/*.bin  (LiDAR frames)
                                         │
               ┌─────────────────────────┴──────────────────────────┐
@@ -81,30 +140,30 @@ stack via self-contained `test/` and `bench/` CMake projects.
 ```
 
 `KittiSequence` synchronizes OXTS and Velodyne frames by index and reports
-per-sequence statistics (frame count, GPS-fix count, CRC failures, mean
-points/frame, GPS bounding box).
+per-sequence statistics: total frames, GPS-fix count, LiDAR CRC failures, mean
+points/frame, and the GPS-trajectory bounding box.
 
 ---
 
-## Components
+## Components in detail
 
 ### Data ingestion
 
 - **KITTI OXTS reader** — [`kitti_oxts_importer`](src/library/src/types/io/track/kitti_oxts_importer.cpp).
-  Parses one `.txt` per frame (30 fields), validates ranges, skips malformed
-  frames, and converts geodetic coordinates to a local ENU frame anchored at the
-  first frame using the Haversine formula. Exposes position, velocity (n/e/f),
-  IMU (accel + angular rate), and GPS accuracy/quality fields.
+  Parses one `.txt` per frame (30 space-separated fields), validates ranges, skips
+  malformed frames without aborting the load, and converts geodetic coordinates to
+  a local **ENU** frame anchored at the first frame via the **Haversine** formula.
+  Exposes position (lat/lon/alt + ENU), velocity (north/east/forward), IMU
+  (acceleration + angular rate), and GPS accuracy/quality fields.
 - **KITTI Velodyne reader** — [`kitti_lidar_reader`](src/library/src/types/io/lidar/kitti_lidar_reader.cpp).
   Decodes raw little-endian `float32 (x, y, z, intensity)`, enforces the 16-byte
   stride, screens coordinate/intensity ranges, computes a **CRC32** over the raw
   bytes, and verifies it against an optional `.bin.crc` sidecar.
-- **CRC32** — [`util/crc32.hpp`](src/library/include/util/crc32.hpp).
-  Header-only, `constexpr`, reflected polynomial `0xEDB88320` (matches
-  zlib/PNG/Ethernet). Verified against the standard check value
-  (`CRC32("123456789") = 0xCBF43926`).
+- **CRC32** — [`util/crc32.hpp`](src/library/include/util/crc32.hpp). Header-only,
+  `constexpr`, reflected polynomial `0xEDB88320` (matches zlib / PNG / Ethernet).
+  Verified against the standard check value `CRC32("123456789") = 0xCBF43926`.
 - **Synchronized store** — [`KittiSequence`](src/library/include/types/io/kitti_sequence.hpp).
-  Pairs OXTS ↔ LiDAR by frame index and aggregates sequence statistics.
+  Pairs OXTS ↔ LiDAR by frame index and aggregates the sequence statistics above.
 
 ### Road network from GPS + OSM
 
@@ -112,15 +171,16 @@ points/frame, GPS bounding box).
   Bins trajectory points by heading (10° buckets), clusters spatially within each
   bucket, connects centroids into ordered segments, and marks intersections where
   differently-headed clusters meet — the trace-mining approach of Schroedl et al.
-  / Biagioni & Eriksson.
+  and Biagioni & Eriksson.
 - **OSM road importer** — [`osm_importer`](src/library/src/geometry/road_graph/osm_importer.cpp).
   Dependency-free `.osm` XML parser → attributed [`RoadGraph`](src/library/include/geometry/road_graph/road_graph.hpp)
-  (length, speed limit, highway class, polyline) in the same ENU frame as the GPS,
-  with binary save/load.
+  (length, speed limit, `highway` class, polyline) in the same ENU frame as the
+  GPS, with binary save/load.
 - **HMM map matcher** — [`map_matcher`](src/library/src/geometry/road_graph/map_matcher.cpp).
   Newson–Krumm hidden-Markov matching: Gaussian emission from perpendicular
-  GPS-to-edge distance, transition penalty on GPS-step vs. on-road distance, and a
-  Viterbi decode returning matched edges, snapped points, and per-point confidence.
+  GPS-to-edge distance, transition penalty on measured-step vs. on-road distance,
+  and a **Viterbi** decode returning matched edges, snapped points, and per-point
+  confidence.
 - **Graph algorithms** — [`graph_algorithms.hpp`](src/library/include/geometry/road_graph/graph_algorithms.hpp):
   Dijkstra shortest path (edge weight = length) and nearest-edge spatial query.
 
@@ -132,7 +192,7 @@ points/frame, GPS bounding box).
 - **RANSAC ground extraction** — [`ground_extractor`](src/library/src/geometry/lidar/ground_extractor.cpp).
   Random 3-point plane sampling with inlier counting; classifies ground vs.
   obstacle and reports ground ratio, plane normal, and inlier/outlier counts. The
-  result type is a standard-layout POD for ABI stability.
+  result type is a standard-layout POD for ABI stability (see war stories).
 - **Frame validator** — [`frame_validator.hpp`](src/library/include/geometry/lidar/frame_validator.hpp).
   Eight integrity checks per frame: CRC, point-count bounds, NaN/Inf screening,
   range validity, azimuth coverage (density), intensity distribution, and
@@ -140,12 +200,11 @@ points/frame, GPS bounding box).
 
 ### Quality & tooling
 
-- **GoogleTest suite** — [`test/`](test/): **39 tests** across CRC32, KITTI
-  readers, k-d tree, ground extraction, frame validation, centerline, and map
-  matching. Builds without Boost/Osmium.
-- **Google Benchmark harness** — [`bench/`](bench/): **15 benchmarks** including
-  four that run against the **real KITTI sequence** (`*_real`) and skip cleanly
-  when the dataset is absent.
+- **GoogleTest suite** — [`test/`](test/): 39 tests across CRC32, KITTI readers,
+  k-d tree, ground extraction, frame validation, centerline, and map matching.
+- **Google Benchmark harness** — [`bench/`](bench/): 15 benchmarks, including four
+  that run against the **real KITTI sequence** (`*_real`) and skip cleanly when the
+  dataset is absent.
 - **CI** — [`.github/workflows/ci.yml`](.github/workflows/ci.yml): build, test
   (ctest), benchmarks (JSON artifact), and an AddressSanitizer + UBSan job.
 - **Visualization** — [`python/`](python/): `visualize_map.py` (folium: road
@@ -154,54 +213,97 @@ points/frame, GPS bounding box).
 
 ---
 
+## Algorithms & math
+
+**Haversine ENU projection.** With anchor `(lat₀, lon₀, alt₀)` (first frame), a
+point `(lat, lon, alt)` maps to local East/North/Up metres using signed
+great-circle distances, giving a locally-flat tangent frame that GPS, OSM, and
+LiDAR all share.
+
+**CRC32 (`0xEDB88320`).** Reflected, table-driven, `constexpr` — `init/xor-out =
+0xFFFFFFFF`. Incremental `update()` is resumable, so a frame's CRC can be computed
+streaming over the raw bytes.
+
+**Centerline clustering (Schroedl / Biagioni).** Heading buckets (10°) →
+greedy proximity clustering within a bucket (5 m radius) → centroids as centerline
+nodes → order-and-chain within a bucket into segments → intersections where
+cross-heading clusters fall within 10 m.
+
+**HMM map matching (Newson–Krumm).** Emission `p(z|e) ∝ exp(−d²/2σ²)` from the
+perpendicular GPS-to-edge distance (σ ≈ 4.07 m); transition `∝ exp(−|Δgps −
+Δroute|/β)` (β ≈ 3 m). Viterbi recovers the most-likely edge sequence; output
+includes snapped points and confidence.
+
+**RANSAC ground plane.** Sample 3 points → plane via cross product → count inliers
+within 0.2 m → keep the best over N iterations → classify ground/obstacle and
+report the ground ratio.
+
+**k-d tree (nanoflann).** Static 3D index; `radiusSearch` uses squared L2
+internally (converted back to metres at the API).
+
+**Frame validation.** Eight independent checks combined into a single pass/fail,
+so one report line summarizes a frame's trustworthiness.
+
+---
+
+## Data formats
+
+**KITTI OXTS** (`oxts/data/NNNNNNNNNN.txt`) — one line, 30 space-separated fields:
+`lat lon alt roll pitch yaw vn ve vf vl vu ax ay az af al au wx wy wz pos_accuracy
+vel_accuracy navstat numsats posmode velmode orimode`.
+
+**KITTI Velodyne** (`velodyne_points/data/NNNNNNNNNN.bin`) — flat little-endian
+`float32` quadruples `(x, y, z, intensity)`; frame size is always a multiple of
+16 bytes.
+
+**OpenStreetMap** (`.osm` XML) — `<node lat lon>` and `<way>` with `<nd ref>` and
+`<tag k="highway" ...>` / `maxspeed`; only driving `highway` classes are kept.
+
+---
+
 ## Building
 
 Requirements: a C++20 compiler (GCC 13+, Clang 15+), CMake ≥ 3.16, and the
-submodules (`nanoflann`, `googletest`, `benchmark`):
+submodules:
 
 ```bash
-git submodule update --init --recursive
+git submodule update --init --recursive   # nanoflann, googletest, benchmark
 ```
 
-### Tests
-
+**Tests**
 ```bash
 cmake -S test -B build/test -DCMAKE_BUILD_TYPE=Release
 cmake --build build/test -j
 ctest --test-dir build/test --output-on-failure
 ```
 
-### Benchmarks
-
+**Benchmarks**
 ```bash
 cmake -S bench -B build/bench -DCMAKE_BUILD_TYPE=Release
 cmake --build build/bench -j
 ./build/bench/hdmap_bench
 ```
 
-Both are self-contained CMake projects: they compile the pipeline sources plus
-the bundled `googletest`/`benchmark`/`nanoflann` submodules — no system Boost or
+Both are self-contained CMake projects: they compile the pipeline sources plus the
+bundled `googletest` / `benchmark` / `nanoflann` submodules — no system Boost or
 Osmium required.
 
 ---
 
 ## Running
 
-### Against the real KITTI dataset
-
-Point `KITTI_PATH` at a KITTI raw sequence directory (containing `oxts/data/` and
-`velodyne_points/data/`); it defaults to the standard EC2 path if unset:
+**Against the real KITTI dataset** — point `KITTI_PATH` at a raw sequence
+directory (with `oxts/data/` and `velodyne_points/data/`):
 
 ```bash
 KITTI_PATH=/path/to/2011_09_26/2011_09_26/2011_09_26_drive_0001_sync \
   ./build/bench/hdmap_bench --benchmark_filter='.*_real'
 ```
 
-Real-data benchmarks print `[SKIP] Real KITTI benchmarks: path not found` and
-fall back gracefully when the dataset is absent (e.g. in CI).
+Real-data benchmarks print `[SKIP] Real KITTI benchmarks: path not found` and fall
+back gracefully when the dataset is absent (e.g. in CI).
 
-### Visualization
-
+**Visualization**
 ```bash
 pip install -r python/requirements.txt
 python python/visualize_map.py --demo --out map.html
@@ -212,8 +314,8 @@ python python/visualize_pointcloud.py --bin frame.bin --out frame.png
 
 ## Results (real KITTI)
 
-Measured on the real `2011_09_26_drive_0001_sync` sequence (108 frames) on EC2
-(GCC 13.3, `-O3`). Full tables — including the local/synthetic reference numbers,
+Measured on the real `2011_09_26_drive_0001_sync` sequence (108 frames) on **EC2
+(GCC 13.3, `-O3`)**. Full tables — including local/synthetic reference numbers,
 kept clearly separate — are in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 | Benchmark (real KITTI) | Throughput | Time/frame | Notes |
@@ -229,36 +331,100 @@ pass; AddressSanitizer + UBSan clean.
 
 ---
 
-## Engineering notes & notable issues
+## Testing, sanitizers & CI
 
-Real problems solved during development — the kind of ABI/optimizer/measurement
-issues that only surface on real hardware and real data:
+- **GoogleTest (39 tests):** valid/malformed OXTS, ENU accuracy, missing-directory
+  handling; Velodyne decode, wrong-size rejection, CRC mismatch detection, NaN
+  detection; CRC32 known vectors; k-d tree build/NN/kNN/radius + empty-cloud edge
+  case; RANSAC planar→100 % and non-planar→low ratio; validator all-pass / CRC-fail
+  / empty / NaN / all-zero-intensity; centerline node/edge/intersection extraction;
+  map matching to expected edges; Dijkstra on a grid; nearest-edge query.
+- **AddressSanitizer + UBSan:** the full suite runs clean under `-fsanitize=
+  address,undefined`.
+- **GitHub Actions:** four jobs — `build`, `test` (ctest), `bench` (JSON artifact
+  upload), and `asan` — on `ubuntu-22.04`. Real-KITTI benchmarks skip on CI (no
+  dataset) by design.
 
-- **Corrupted benchmark counter (GCC 13.3, `-O3`) — misuse of `DoNotOptimize`.**
-  On EC2, `mean_ground_ratio` read back as `0` (and, in early forms, garbage
-  denormals) while the extractor computed a correct value. A GDB **hardware
-  watchpoint** on the field traced the zero-write to the *caller*: an untimed
-  statistics loop passed a non-const lvalue to `benchmark::DoNotOptimize(...)` and
-  then read the field back. The non-const `DoNotOptimize(Tp&)` overload uses an
-  `"+m,r"` (read-write) asm constraint, so the compiler is entitled to clobber the
-  operand. **Fix:** drop the barrier in untimed passes (values already feed real
-  arithmetic, so there is no dead-code-elision risk); keep it only in timed loops
-  where the result is discarded. This was *not* a layout, flag, or compiler bug —
-  all were ruled out by matching offsets/flags and the watchpoint evidence.
+---
 
-- **ABI-robust result type.** `GroundResult` was reduced to an all-scalar,
-  standard-layout, trivially-copyable POD (dropping an unused `std::vector<bool>`)
-  so its return-by-value ABI is fixed across every translation unit, compiler, and
-  standard library — removing a whole class of cross-TU layout hazards.
+## Engineering war stories — every bug and how it was solved
 
-- **Cross-toolchain include hygiene.** libc++ (local) resolved several standard
-  includes transitively that libstdc++ (CI/EC2) does not; explicit includes were
-  added after CI caught the difference.
+Real problems solved on real hardware and real data. These are the debugging
+stories, not hypotheticals.
 
-- **Benchmark counters vs. iteration counts.** Dataset-level counters
-  (`mean_ground_ratio`, `pass_count`/`total_count`) are computed once over a
-  single pass into initialized values, so they are stable under Google Benchmark's
-  repetition/aggregation rather than being multiplied by iteration counts.
+1. **`constexpr` CRC32 table rejected by Clang.**
+   *Symptom:* `constexpr variable 'table' must be initialized by a constant
+   expression` — Clang rejected a `static constexpr` data member initialized by a
+   member function. *Fix:* expose the 256-entry table as a `static constexpr`
+   *function* returning `std::array`, materialized as `constexpr auto lut =
+   table();` inside `update()`. Now header-only with no static-init issues.
+
+2. **CI red on Linux, green on macOS — transitive includes.**
+   *Symptom:* GoogleTest jobs failed to compile on GitHub's GCC/libstdc++ while
+   passing on macOS/libc++. *Root cause:* test files used `std::runtime_error`,
+   `std::nanf`, `std::fabs`, `std::string` without directly including
+   `<stdexcept>`/`<cmath>`/`<string>`; libc++ pulled them in transitively,
+   libstdc++ did not. *Fix:* add the explicit includes. *Lesson:* verify on the CI
+   toolchain, not just the dev box.
+
+3. **Benchmark counters multiplied by iteration count.**
+   *Symptom:* `total_count = 216` on a 108-frame sequence. *Root cause:* the
+   real-KITTI counters accumulated *inside* the timed `for (auto _ : state)` loop,
+   so Google Benchmark's iteration count scaled them. *Fix:* compute each
+   dataset-level counter once over a single pass into an initialized value; the
+   timed loop only measures.
+
+4. **`GroundResult` ABI hardening.**
+   *Symptom (early theory):* garbage `ground_ratio` (`1e277`, `1e-321`) on
+   Linux/GCC only. *Action:* removed an unused `std::vector<bool>` so
+   `GroundResult` became an all-scalar, standard-layout, trivially-copyable POD —
+   one fixed ABI across every TU/compiler/stdlib. Good hygiene, but (honestly) not
+   the actual fix for the next bug.
+
+5. **The real one — `DoNotOptimize` clobber, found with a GDB hardware
+   watchpoint.**
+   *Symptom:* on EC2 (GCC 13.3, `-O3`), `mean_ground_ratio` read back as `0` even
+   though the extractor computed the correct value; other fields were fine.
+   *Investigation:* ruled out — struct layout (identical `offsetof`/`sizeof` in
+   both TUs), compile flags (identical `-O3 -DNDEBUG -std=c++20`), and a compiler
+   codegen bug. A **GDB hardware watchpoint** on the field caught the zero-write
+   originating in the *caller*, right after the call, at `movsd %xmm0,…`.
+   *Root cause:* the untimed statistics loop passed a **non-const lvalue** to
+   `benchmark::DoNotOptimize(g.ground_ratio)` and then read the field; the
+   non-const `DoNotOptimize(Tp&)` overload uses a `"+m,r"` **read-write** asm
+   constraint, so GCC was entitled to write `0` back into it. *Fix:* remove the
+   barrier from untimed statistics passes (values already feed real arithmetic → no
+   dead-code-elision risk); keep it only in timed loops where the result is
+   discarded. *Rule:* never pass a value to `DoNotOptimize` and then read it
+   expecting it unchanged.
+
+6. **`nodiscard` warning in the k-d tree wrapper.** nanoflann's `radiusSearch`
+   returns a `[[nodiscard]]` count; the wrapper discards it deliberately —
+   silenced with an explicit `(void)`.
+
+7. **Toolchain/version friction.** The upstream engine's CMake requires a newer
+   CMake than the EC2 image shipped (`4.2` vs `3.28.3`), so the self-contained
+   `bench/` and `test/` projects (CMake ≥ 3.16) were used for all pipeline work —
+   which also keeps CI fast and Boost/Osmium-free.
+
+8. **Dependency & license hygiene.** The heavyweight `HDMapping` submodule
+   (OpenGL/GUI + a different license) was removed; LiDAR processing is implemented
+   natively in C++20 with nanoflann and an in-house CRC32, avoiding a license clash
+   and a large GUI dependency.
+
+---
+
+## Where it was built and run
+
+| Environment | Role | Toolchain |
+|---|---|---|
+| **EC2 (Ubuntu)** | Canonical real-KITTI runs & deep debugging | GCC 13.3, `-O3`, 4 vCPU, GDB 15.1 |
+| **macOS (Apple Silicon)** | Development & correctness baseline | Apple clang, libc++, 8-core |
+| **GitHub Actions (`ubuntu-22.04`)** | CI: build / test / bench / ASan+UBSan | GCC (Ubuntu), ctest |
+
+The real KITTI sequence (`2011_09_26_drive_0001_sync`, 108 frames) lives on EC2;
+local and CI use synthetic, deterministic data so correctness is provable without
+the dataset.
 
 ---
 
@@ -267,9 +433,9 @@ issues that only surface on real hardware and real data:
 ```
 src/library/           Core pipeline library (C++20)
   include/, src/
-    types/io/          KITTI OXTS + Velodyne readers, sequence store
+    types/io/          KITTI OXTS + Velodyne readers, synchronized sequence store
     geometry/          centerline, road_graph, index (k-d tree), lidar
-    util/              crc32, synthetic data generators
+    util/              crc32, synthetic-data generators
   ... plus the road-matching engine (network graph, routing, HMM/MDP)
 bench/                 Google Benchmark harness (15 benchmarks)
 test/                  GoogleTest suite (39 tests)
@@ -281,17 +447,28 @@ third_party/           nanoflann, googletest, benchmark (submodules)
 
 ---
 
+## Roadmap
+
+- KITTI + OSM fusion at multi-sequence scale; export matched maps to standard HD
+  formats.
+- Eigen-backed geometry and multi-frame LiDAR registration (ICP/NDT) natively.
+- 3D map visualization and larger-scale benchmarking (ingestion throughput, query
+  latency, graph-construction time) across full KITTI drives.
+- Continuous benchmark tracking in CI with historical regression detection.
+
+---
+
 ## License & attribution
 
-This project is licensed under the **GNU Affero General Public License v3.0**
-(see [LICENSE.md](LICENSE.md)).
+Licensed under the **GNU Affero General Public License v3.0** (see
+[LICENSE.md](LICENSE.md)).
 
 The road-matching engine under `src/library` and `src/app` derives from
 **map-matching-2** by Adrian Wöltche (https://github.com/iisys-hof/map-matching-2),
 which is AGPL-3.0; its original documentation is preserved in
-[docs/MATCHING_ENGINE.md](docs/MATCHING_ENGINE.md). All extensions described
-above — KITTI ingestion, centerline extraction, the OSM road-graph and HMM
-matcher, the nanoflann k-d tree, RANSAC ground extraction, the frame validator,
-CRC32, the benchmark/test/CI/visualization tooling — were added by
-**Kartik Vadhawana**. Bundled third-party libraries (`nanoflann`, `googletest`,
-`benchmark`) are under their respective licenses.
+[docs/MATCHING_ENGINE.md](docs/MATCHING_ENGINE.md). All extensions described here —
+KITTI ingestion, centerline extraction, the OSM road-graph and HMM matcher, the
+nanoflann k-d tree, RANSAC ground extraction, the frame validator, CRC32, and the
+benchmark / test / CI / visualization tooling — were built by **Kartik Vadhawana**.
+Bundled third-party libraries (`nanoflann`, `googletest`, `benchmark`) are under
+their respective licenses.
