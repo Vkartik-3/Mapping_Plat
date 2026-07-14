@@ -314,20 +314,106 @@ python python/visualize_pointcloud.py --bin frame.bin --out frame.png
 
 ## Results (real KITTI)
 
-Measured on the real `2011_09_26_drive_0001_sync` sequence (108 frames) on **EC2
-(GCC 13.3, `-O3`)**. Full tables — including local/synthetic reference numbers,
-kept clearly separate — are in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+Two environments are reported and **kept clearly separate** — never mix them, they
+use different CPUs, compilers, and (for the real rows) different input data:
 
-| Benchmark (real KITTI) | Throughput | Time/frame | Notes |
-|---|---|---|---|
-| `kitti_oxts_parse_real` | 97,576 frames/s | 0.010 ms | 108 GPS/IMU frames |
-| `kitti_lidar_read_real` | 100.1 frames/s | 9.99 ms | 108 Velodyne frames |
-| `ground_extraction_real` | 63.6 frames/s | 15.73 ms | `mean_ground_ratio = 0.6676` |
-| `frame_validate_real` | 55.2 frames/s | 18.10 ms | `108 / 108` frames pass (100%) |
+- **EC2 (real KITTI data)** — the canonical results, run against the real
+  `2011_09_26_drive_0001_sync` sequence (108 frames).
+- **Local (synthetic data)** — a macOS/clang box, for correctness and relative
+  comparison only.
 
-Correctness: CRC32 matches the standard check value; RANSAC recovers the ground
-plane; k-d tree NN of an existing point returns distance 0; **39/39** GoogleTests
-pass; AddressSanitizer + UBSan clean.
+| | EC2 (canonical) | Local (reference) |
+|---|---|---|
+| OS | Ubuntu (EC2) | macOS (darwin) |
+| Compiler | GCC 13.3.0 | Apple clang |
+| Build | Release (`-O3 -DNDEBUG`) | Release (`-O3`) |
+| C++ standard | C++20 | C++20 |
+| CPU | 4 × ~3.18 GHz | 8-core Apple Silicon |
+| KITTI sequence | `2011_09_26_drive_0001_sync` (108 frames) | synthetic |
+| Source revision | `0e7be08` | `0e7be08` |
+
+### Canonical — EC2, real KITTI (108 frames)
+
+Full-precision values from the machine-readable JSON run:
+
+| Benchmark | Throughput | Time/frame | Full-sequence time | Notes |
+|---|---|---|---|---|
+| `kitti_oxts_parse_real` | 97,576.65 frames/s | 0.01025 ms | 1.106935 ms | 108 OXTS GPS/IMU frames |
+| `kitti_lidar_read_real` | 100.119 frames/s | 9.989 ms | 1078.754 ms | 108 Velodyne `.bin` frames |
+| `ground_extraction_real` | 63.569 frames/s | 15.732 ms | 1699.075 ms | RANSAC; `mean_ground_ratio = 0.6675539843` |
+| `frame_validate_real` | 55.248 frames/s | 18.101 ms | 1954.887 ms | 8-check validator; `pass_count = 108 / total = 108` (100%) |
+
+### Full EC2 console run — all 15 benchmarks (synthetic rows included for context)
+
+```text
+Run on (4 X 3178.99 MHz CPU s)
+CPU Caches:
+  L1 Data 48 KiB (x2)   L1 Instruction 32 KiB (x2)
+  L2 Unified 2048 KiB (x2)   L3 Unified 107520 KiB (x1)
+---------------------------------------------------------------------------------
+Benchmark                       Time             CPU   Iterations UserCounters...
+---------------------------------------------------------------------------------
+kitti_oxts_parse/200      1370292 ns      1369814 ns          101 items_per_second=146.005k/s
+kitti_oxts_parse_real     1104673 ns      1104680 ns          127 items_per_second=97.7658k/s
+kitti_lidar_read_1k          93.2 ms         93.2 ms            2 items_per_second=10.7296k/s
+kitti_lidar_read_real        1079 ms         1079 ms            1 items_per_second=100.132/s
+crc32_1frame              4765150 ns      4765163 ns           29 bytes_per_second=384.259Mi/s
+ground_extraction_1          15.9 ms         15.9 ms            9
+frame_validate_100           2015 ms         2015 ms            1 items_per_second=49.6372/s
+ground_extraction_real       1694 ms         1694 ms            1 frames=108 items_per_second=63.7463/s mean_ground_ratio=0.667554
+frame_validate_real          1948 ms         1947 ms            1 frames=108 items_per_second=55.4571/s pass_count=108 total_count=108
+graph_construct_osm           322 us          322 us          431
+graph_dijkstra_1k            27.8 ms         27.8 ms            5 items_per_second=35.9848k/s
+rtree_knn_1k                 16.1 ms         16.1 ms            9 items_per_second=62.2525k/s
+map_match_sequence          0.027 ms        0.027 ms         5224 items_per_second=7.41324M/s
+kdtree_build_100k            29.5 ms         29.5 ms            5 items_per_second=3.38825M/s
+kdtree_nn_1k                0.674 ms        0.674 ms          208 items_per_second=1.48412M/s
+```
+
+> Console vs. JSON times differ only by run-to-run CPU-frequency variation; the
+> JSON run is the precise source for the canonical table above.
+
+### What each benchmark measures
+
+| Benchmark | Stage | What it measures |
+|---|---|---|
+| `kitti_oxts_parse/200` | ingestion | parse a 200-frame synthetic OXTS sequence |
+| `kitti_oxts_parse_real` | ingestion | parse the 108 real OXTS frames |
+| `kitti_lidar_read_1k` | ingestion | read 1000 synthetic Velodyne frames |
+| `kitti_lidar_read_real` | ingestion | read the 108 real Velodyne `.bin` frames |
+| `crc32_1frame` | integrity | CRC32 over one ~120k-point frame (throughput MiB/s) |
+| `ground_extraction_1` | LiDAR | RANSAC ground plane on one synthetic frame |
+| `ground_extraction_real` | LiDAR | RANSAC over all 108 real frames + mean ground ratio |
+| `frame_validate_100` | integrity | 8-check validation ×100 synthetic frames |
+| `frame_validate_real` | integrity | 8-check validation over all 108 real frames + pass rate |
+| `graph_construct_osm` | road graph | build a 30×30 road graph from `.osm` XML |
+| `graph_dijkstra_1k` | routing | 1000 Dijkstra shortest-path queries on a grid graph |
+| `rtree_knn_1k` | spatial | 1000 nearest-edge spatial queries on the road graph |
+| `map_match_sequence` | matching | HMM/Viterbi match of a full GPS sequence |
+| `kdtree_build_100k` | spatial | build a nanoflann k-d tree over 100k points |
+| `kdtree_nn_1k` | spatial | 1000 nearest-neighbour k-d tree queries |
+
+### Reference — Local, synthetic data (macOS/clang)
+
+Relative-performance and correctness reference only; **not** comparable to the EC2
+real-data rows.
+
+| Benchmark | Result |
+|---|---|
+| `kitti_oxts_parse/200` | 2.95 ms |
+| `kitti_lidar_read_1k` | 117 ms (8.74k frames/s) |
+| `crc32_1frame` | 395 MiB/s |
+| `ground_extraction_1` | 6.12 ms (synthetic 125k pts) |
+| `graph_construct_osm` | 229 µs |
+| `graph_dijkstra_1k` | 11.3 ms (88.8k q/s) |
+| `rtree_knn_1k` | 6.57 ms (152k q/s) |
+| `map_match_sequence` | 0.017 ms |
+| `kdtree_build_100k` | 19.1 ms |
+| `kdtree_nn_1k` | 0.446 ms (2.24M q/s) |
+
+**Correctness (both environments):** CRC32 `"123456789"` → `0xCBF43926`; RANSAC
+recovers the planted ground ratio; k-d tree NN of an existing point → distance 0;
+GoogleTest **39/39** pass; AddressSanitizer + UBSan clean.
 
 ---
 
@@ -440,7 +526,7 @@ src/library/           Core pipeline library (C++20)
 bench/                 Google Benchmark harness (15 benchmarks)
 test/                  GoogleTest suite (39 tests)
 python/                folium + matplotlib visualization
-docs/                  BENCHMARKS.md (results), MATCHING_ENGINE.md (engine docs)
+docs/                  MATCHING_ENGINE.md (upstream engine docs)
 third_party/           nanoflann, googletest, benchmark (submodules)
 .github/workflows/     CI (build / test / bench / asan+ubsan)
 ```
