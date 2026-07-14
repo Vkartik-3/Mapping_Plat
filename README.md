@@ -11,13 +11,17 @@ OpenStreetMap road-network graph, indexes and validates 3D point clouds, and
 measures every stage with a benchmark harness, a GoogleTest suite, continuous
 integration, and Python visualization.
 
-**What has actually been run:** the LiDAR ingestion and integrity benchmarks were
-executed on the real KITTI `2011_09_26_drive_0001_sync` sequence (108 frames) on
-EC2 (see [Results](#results-real-kitti)). The KITTI-GPS → real-OSM map-matching
-workflow is implemented and unit-tested against deterministic fixtures; running it
-on a real OSM extract requires the `KITTI_PATH` / `OSM_PATH` inputs (see
-[Real KITTI → OSM workflow](#real-kitti--osm-workflow)) and its real-data metrics
-are not reported here because that run has not been performed in this environment.
+**What has actually been run (real data, on EC2):**
+- The **KITTI-GPS → real-OSM map-matching workflow** was executed on the real
+  `2011_09_26_drive_0001_sync` OXTS trajectory (108 GPS observations) against a
+  real Karlsruhe OpenStreetMap extract, building a 14,297-node / 15,087-edge road
+  graph and matching all 108 observations (see
+  [Real KITTI → OSM workflow](#real-kitti--osm-workflow)).
+- The **LiDAR ingestion and integrity benchmarks** were executed on the same real
+  sequence's 108 Velodyne frames (see [Results](#results-real-kitti)).
+
+Synthetic/fixture benchmarks are labeled as such and are never mixed with the
+real-data numbers.
 
 > **Keywords:** HD maps · autonomous driving · SLAM-adjacent mapping · KITTI raw
 > dataset · OXTS GPS/IMU · Velodyne LiDAR · point cloud · WGS84 · ECEF · ENU ·
@@ -404,11 +408,38 @@ commit, dataset paths). Visualize with:
 python python/visualize_map.py --workflow-dir workflow_out --out map.html
 ```
 
-**Status:** the workflow is implemented and unit-tested against deterministic
-fixtures (see [Testing](#testing-sanitizers--ci)). It has **not** been executed on
-a real OSM extract in this environment, so no real snap-distance or matched-rate
-numbers are reported. The comparison of nearest-edge vs. HMM is left to the
-measured output — this README makes **no claim** that HMM is more accurate.
+### Measured run — real KITTI + real OSM (EC2)
+
+Executed on AWS EC2 (GCC 13.3.0, Release, Intel Xeon Platinum 8488C) from commit
+`9435845`, matching the real `2011_09_26_drive_0001_sync` OXTS trajectory (108 GPS
+observations) against a **real OpenStreetMap road graph**. The OSM extract was cut
+from the Karlsruhe Geofabrik download to a bounding box **derived from the KITTI
+OXTS coordinates** (`8.41297–8.45430 E`, `48.99460–49.03500 N`) and filtered to
+`highway` ways. Full report: [docs/examples/workflow_report.json](docs/examples/workflow_report.json).
+
+| Metric | Value |
+|---|---|
+| GPS observations | 108 |
+| Matched observations | 108 (100.0%) |
+| OSM graph | 14,297 nodes · 15,087 edges |
+| HMM snap distance | mean 4.156 m · p50 4.190 m · p95 4.241 m · max 4.311 m |
+| Nearest-edge baseline snap | mean 4.156 m · p50 4.190 m · p95 4.241 m · max 4.311 m |
+| Low-confidence matches | 0 |
+| Disconnected transitions | 0 |
+| Timings | OSM build 39.40 ms · spatial index 3.70 ms · baseline 11.80 ms · HMM 14.21 ms · total 72.82 ms |
+
+**Reading these numbers honestly:**
+- *Snap distance* is the distance from each GPS observation to its matched position
+  on the OSM graph. It is **not** an independently-verified absolute localization
+  error (there is no ground-truth map correspondence here), so it should not be
+  reported as "≈4 m localization accuracy."
+- For this short, unambiguous trajectory the **nearest-edge baseline and HMM
+  produced identical snap statistics** — the HMM's continuity model did not need to
+  override any candidate. This README therefore makes **no claim** that HMM is more
+  accurate; the two are reported separately and, here, measured equal. HMM was
+  ~20% slower on the matching phase (14.21 vs 11.80 ms) for no accuracy gain *on
+  this sequence*; its benefit is expected on longer/noisier/ambiguous routes.
+- These are results for **one 108-frame sequence**, not a dataset-wide claim.
 
 ---
 
