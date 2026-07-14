@@ -310,6 +310,16 @@ python python/visualize_map.py --demo --out map.html
 python python/visualize_pointcloud.py --bin frame.bin --out frame.png
 ```
 
+### Visualization Examples
+
+Demo outputs generated on synthetic data. Run visualization scripts against real
+KITTI data to produce results from the 108-frame sequence.
+
+- Road network + matched trajectory (folium): [docs/examples/map_demo.html](docs/examples/map_demo.html)
+- LiDAR frame — ground/obstacle + intensity (matplotlib): [docs/examples/frame_demo.png](docs/examples/frame_demo.png)
+
+![Demo LiDAR frame visualization](docs/examples/frame_demo.png)
+
 ---
 
 ## Results (real KITTI)
