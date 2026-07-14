@@ -20,6 +20,7 @@ set(LIB_SRC "${REPO_ROOT}/src/library")
 set(NANOFLANN_INC "${REPO_ROOT}/third_party/nanoflann/include")
 
 set(PIPELINE_SOURCES
+        ${LIB_SRC}/src/geometry/coordinates/wgs84.cpp
         ${LIB_SRC}/src/types/io/track/kitti_oxts_importer.cpp
         ${LIB_SRC}/src/types/io/lidar/kitti_lidar_reader.cpp
         ${LIB_SRC}/src/geometry/centerline/centerline_extractor.cpp
@@ -40,6 +41,7 @@ add_executable(hdmap_bench
         bench_main.cpp
         bench_kitti.cpp
         bench_graph.cpp
-        bench_kdtree.cpp)
+        bench_kdtree.cpp
+        bench_coordinates.cpp)
 
 target_link_libraries(hdmap_bench PRIVATE hdmap_pipeline_bench_lib benchmark::benchmark)

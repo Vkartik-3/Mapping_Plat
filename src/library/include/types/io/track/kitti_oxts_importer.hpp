@@ -1,8 +1,9 @@
 // Copyright (C) 2025 Kartik Vadhawana
 //
 // KITTI raw OXTS (GPS/IMU) reader. Parses one .txt file per frame from a
-// KITTI raw sequence and converts geodetic coordinates to a local ENU frame
-// anchored at the first frame, for downstream trajectory / centerline mining.
+// KITTI raw sequence and converts geodetic coordinates to a true WGS84 local
+// ENU frame (geodetic -> ECEF -> ENU, see geometry/coordinates/wgs84.hpp)
+// anchored at the first frame, for downstream trajectory / map matching.
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as
@@ -53,15 +54,14 @@ namespace map_matching_2::io::track {
     class kitti_oxts_importer {
 
     public:
-        // Radius used for the Haversine great-circle projection (WGS84 mean).
-        static constexpr double earth_radius_m = 6371000.0;
-
         // Parse a single OXTS record from one whitespace-separated line.
         // Returns false if the line is malformed or holds out-of-range values.
         static bool parse_line(const std::string &line, KittiOxtsFrame &out);
 
-        // Signed great-circle distance components (Haversine) from the anchor
-        // to (lat, lon), giving a local east/north tangent-plane offset.
+        // Convert (lat, lon, alt) to true WGS84 local ENU metres about the
+        // anchor (geodetic -> ECEF -> ENU). Thin convenience wrapper around
+        // geometry::coordinates::EnuReferenceFrame kept for API compatibility;
+        // prefer EnuReferenceFrame directly when converting many points.
         static void to_enu(double anchor_lat, double anchor_lon, double anchor_alt,
                 double lat, double lon, double alt,
                 double &easting, double &northing, double &up);

@@ -29,6 +29,10 @@ jobs:
         run: |
           cmake -S bench -B build/bench -DCMAKE_BUILD_TYPE=Release
           cmake --build build/bench -j
+      - name: Configure and build workflow tool
+        run: |
+          cmake -S tools -B build/tools -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/tools -j
 
   test:
     name: GoogleTest suite
@@ -83,3 +87,19 @@ jobs:
           cmake --build build/asan -j
           ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
             ctest --test-dir build/asan --output-on-failure
+
+  workflow:
+    name: KITTI to OSM workflow (skips without data)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install CMake
+        uses: lukka/get-cmake@latest
+      - name: Build and dry-run the workflow (no dataset -> clean skip)
+        run: |
+          cmake -S tools -B build/tools -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/tools -j
+          # No KITTI_PATH/OSM_PATH in CI: the tool prints [SKIP] and exits 0.
+          ./build/tools/kitti_osm_workflow

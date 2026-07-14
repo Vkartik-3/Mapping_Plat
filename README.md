@@ -1,18 +1,26 @@
 # HD Map Pipeline
 
-**A high-performance C++20 pipeline for HD-map and sensor-data engineering — GPS/IMU
-trajectory analysis, road-network graph construction, LiDAR point-cloud
-processing, sensor-data integrity validation, spatial indexing, and reproducible
-benchmarking — validated end-to-end on the real KITTI autonomous-driving dataset.**
+**A C++20 pipeline for HD-map and sensor-data engineering — GPS/IMU trajectory
+analysis, true WGS84 ENU georeferencing, road-network graph construction from
+OpenStreetMap, HMM/Viterbi map matching, LiDAR point-cloud integrity validation,
+spatial indexing, and reproducible benchmarking.**
 
 It ingests raw self-driving sensor logs (KITTI OXTS GPS/IMU + Velodyne LiDAR),
-turns GPS traces into road geometry, matches trajectories onto a road-network
-graph, indexes and validates 3D point clouds, and measures every stage with a
-real-numbers benchmark harness, a GoogleTest suite, continuous integration, and
-Python visualization.
+georeferences the GPS trajectory into a true WGS84 ENU frame, matches it onto an
+OpenStreetMap road-network graph, indexes and validates 3D point clouds, and
+measures every stage with a benchmark harness, a GoogleTest suite, continuous
+integration, and Python visualization.
+
+**What has actually been run:** the LiDAR ingestion and integrity benchmarks were
+executed on the real KITTI `2011_09_26_drive_0001_sync` sequence (108 frames) on
+EC2 (see [Results](#results-real-kitti)). The KITTI-GPS → real-OSM map-matching
+workflow is implemented and unit-tested against deterministic fixtures; running it
+on a real OSM extract requires the `KITTI_PATH` / `OSM_PATH` inputs (see
+[Real KITTI → OSM workflow](#real-kitti--osm-workflow)) and its real-data metrics
+are not reported here because that run has not been performed in this environment.
 
 > **Keywords:** HD maps · autonomous driving · SLAM-adjacent mapping · KITTI raw
-> dataset · OXTS GPS/IMU · Velodyne LiDAR · point cloud · ENU / Haversine ·
+> dataset · OXTS GPS/IMU · Velodyne LiDAR · point cloud · WGS84 · ECEF · ENU ·
 > road-network graph · OpenStreetMap · centerline extraction · map matching ·
 > Hidden Markov Model · Viterbi · Newson–Krumm · Schroedl / Biagioni · RANSAC
 > ground segmentation · nanoflann · k-d tree · nearest-neighbour search · CRC32 ·
@@ -69,24 +77,41 @@ and 2D/3D map benchmarking).
 
 ## What it does
 
+Three distinct concepts are kept separate throughout — they are **not** the same
+thing:
+
+- **GPS trajectory clustering** builds a *trajectory-derived candidate centerline
+  graph* from the GPS trace alone (Schroedl / Biagioni). It does **not** produce a
+  road network from a map.
+- **OpenStreetMap import** builds an *attributed OSM road graph* from an `.osm`
+  extract (length, speed, class, polyline).
+- **HMM / Viterbi map matching** *matches GPS observations onto the existing OSM
+  road graph*. It does **not** extract or infer the road network from GPS.
+
 | Capability | Implementation |
 |---|---|
-| GPS/IMU trajectory analysis | KITTI OXTS reader → local ENU frame (Haversine), IMU + accuracy fields |
-| Road centerline extraction | Trace-clustering (Schroedl / Biagioni) on GPS heading + spatial proximity |
-| Road-network graph construction | OSM `.osm` → attributed graph (length, speed, class, polyline) + binary I/O |
-| Map matching (trace → map) | HMM / Viterbi (Newson–Krumm) snapping GPS onto the road graph |
+| GPS/IMU trajectory analysis | KITTI OXTS reader → **true WGS84 ENU** (geodetic → ECEF → ENU), IMU + accuracy fields |
+| Trajectory-derived centerline graph | Trace-clustering (Schroedl / Biagioni) on GPS heading + spatial proximity |
+| OSM road-graph construction | OSM `.osm` → attributed graph (length, speed, class, polyline) + binary I/O |
+| Map matching (GPS → OSM graph) | HMM / Viterbi (Newson–Krumm) matching GPS observations onto the OSM graph |
 | Routing | Dijkstra shortest path + nearest-edge spatial query |
 | Efficient spatial retrieval | nanoflann 3D k-d tree (NN / kNN / radius) over point clouds |
-| LiDAR ground segmentation | RANSAC plane fitting → ground/obstacle classification |
-| Sensor-data integrity | CRC32 per frame + an 8-check LiDAR frame validator |
+| LiDAR ground segmentation | RANSAC plane fitting → ground/obstacle classification (Velodyne sensor frame) |
+| Sensor-data integrity | CRC32 per frame + an 8-check LiDAR frame validator (Velodyne sensor frame) |
 | Storage & I/O | Velodyne `.bin` decode; binary road-graph serialization |
-| Benchmarking | Google Benchmark harness — 15 benchmarks, incl. real-KITTI runs |
-| Testing & CI | 39 GoogleTests; GitHub Actions (build / test / bench / ASan+UBSan) |
+| Benchmarking | Google Benchmark harness — 17 benchmarks (labeled real-KITTI / synthetic) |
+| Testing & CI | 59 GoogleTests; GitHub Actions (build / test / bench / ASan+UBSan) |
 | Visualization | Python — folium road network, matplotlib point cloud |
 
-Everything in the hot paths is native **C++20**, `std`-only (no heavy runtime
-dependencies), and the `test/` and `bench/` projects build **without** the
-upstream matching engine's Boost/Osmium stack.
+The core is native **C++20** with lightweight spatial-indexing and testing
+dependencies (nanoflann, GoogleTest, Google Benchmark). The `test/`, `bench/`, and
+`tools/` projects build **without** the upstream matching engine's Boost/Osmium
+stack.
+
+> **Note on frames:** LiDAR integrity validation and RANSAC ground extraction
+> currently operate in the **Velodyne sensor frame**. The point clouds are **not**
+> transformed into or fused with the map/ENU frame — only the GPS trajectory and
+> OSM graph share the WGS84 ENU frame.
 
 ---
 
@@ -96,9 +121,9 @@ upstream matching engine's Boost/Osmium stack.
 |---|---|
 | Languages | **C++20**, Python 3 |
 | Build | **CMake** (self-contained `test/` and `bench/` projects) |
-| Spatial / math | **nanoflann** (k-d tree), Boost.Geometry R*-tree (upstream engine), ENU/Haversine geodesy |
+| Spatial / math | **nanoflann** (k-d tree), Boost.Geometry R*-tree (upstream engine), **WGS84 ECEF↔ENU** geodesy |
 | Algorithms | RANSAC, Hidden Markov Model + Viterbi (Newson–Krumm), Schroedl/Biagioni trace clustering, Dijkstra, CRC32 (`0xEDB88320`) |
-| Testing | **GoogleTest** (39 tests) |
+| Testing | **GoogleTest** (59 tests) |
 | Benchmarking | **Google Benchmark** (JSON + console, real-KITTI + synthetic) |
 | CI / quality | **GitHub Actions**, **AddressSanitizer**, **UndefinedBehaviorSanitizer**, `-Wall -Wextra` |
 | Debugging | **GDB** (hardware watchpoints), `nm`, `readelf`, preprocessor/ABI inspection |
@@ -110,33 +135,40 @@ upstream matching engine's Boost/Osmium stack.
 
 ## Architecture
 
+Two independent paths. The **map path** (GPS + OSM) and the **LiDAR integrity
+path** are deliberately separate — LiDAR stays in the Velodyne sensor frame and is
+not fused into the map frame.
+
 ```
-                         KITTI raw sequence (2011_09_26_drive_XXXX_sync)
-                          ├── oxts/data/*.txt             (GPS/IMU, 10 Hz)
-                          └── velodyne_points/data/*.bin  (LiDAR frames)
-                                        │
-              ┌─────────────────────────┴──────────────────────────┐
-              ▼                                                      ▼
-   ┌───────────────────────┐                          ┌──────────────────────────┐
-   │  OXTS GPS/IMU reader   │                          │  Velodyne .bin reader     │
-   │  lat/lon/alt → ENU     │                          │  x,y,z,intensity decode   │
-   │  (Haversine anchor)    │                          │  + CRC32 integrity        │
-   └───────────┬───────────┘                          └────────────┬─────────────┘
-               │                                                     │
-      ┌────────┴─────────┐                             ┌─────────────┴─────────────┐
-      ▼                  ▼                             ▼                           ▼
-┌───────────┐   ┌──────────────────┐         ┌────────────────┐        ┌────────────────────┐
-│ Centerline │   │  HMM map matcher │         │ nanoflann k-d  │        │  RANSAC ground +   │
-│ extraction │   │  (GPS → OSM)     │◄──OSM──►│ tree (3D NN)   │        │  frame validator   │
-└───────────┘   └──────────────────┘         └────────────────┘        └────────────────────┘
-                          │                                                     │
-              ┌───────────┴────────────┐                                        │
-              ▼                        ▼                                        ▼
-      Road-network graph        Matched trajectory                    Ground/obstacle +
-   (nodes, edges, Dijkstra)     (snapped, confidence)                 integrity report
-                          │
-                          ▼
-        Benchmarks (Google Benchmark) · Tests (GoogleTest) · Python visualization
+  MAP PATH                                          LiDAR INTEGRITY PATH (separate)
+  ────────                                          ───────────────────────────────
+  KITTI OXTS GPS/IMU  (oxts/data/*.txt)             Velodyne (velodyne_points/*.bin)
+        │                                                     │
+        ▼                                                     ▼
+  true WGS84 ENU                                     .bin decode (x,y,z,intensity)
+  (geodetic → ECEF → ENU, anchored @ frame 0)        + CRC32 integrity
+        │                                                     │
+        │  same ENU anchor                                    ▼
+        ▼                                            nanoflann k-d tree (3D NN,
+  real OSM road graph  (.osm → attributed graph)     sensor frame)
+        │                                                     │
+        ▼                                                     ▼
+  spatial index (k-d tree over graph nodes)          RANSAC ground extraction +
+        │                                            8-check frame validator
+        ├──────────────┐                             (Velodyne sensor frame)
+        ▼              ▼                                       │
+  nearest-edge     HMM / Viterbi                               ▼
+  baseline         map matching                        ground/obstacle +
+        │              │                               integrity report
+        └──────┬───────┘
+               ▼
+   metrics (snap p50/p95/max, matched %, low-conf,
+   disconnected) → JSON report + Folium visualization
+
+  (Trajectory clustering separately derives a candidate centerline graph from the
+   GPS trace alone; it does not use OSM and does not feed the OSM match.)
+
+  Benchmarks (Google Benchmark) · Tests (GoogleTest) span both paths.
 ```
 
 `KittiSequence` synchronizes OXTS and Velodyne frames by index and reports
@@ -149,10 +181,17 @@ points/frame, and the GPS-trajectory bounding box.
 
 ### Data ingestion
 
+- **WGS84 coordinate transforms** — [`geometry/coordinates/wgs84.hpp`](src/library/include/geometry/coordinates/wgs84.hpp).
+  True geodetic → ECEF → local ENU (and the inverse), double precision, with
+  `GeodeticCoordinate` / `EcefCoordinate` / `EnuCoordinate` / `EnuReferenceFrame`
+  types and WGS84 constants (a, f, e²). This replaces an earlier approximate
+  Haversine/equirectangular "ENU". KITTI GPS and OSM nodes share one
+  `EnuReferenceFrame` (same anchor + transform), so they live in the exact same
+  metric frame.
 - **KITTI OXTS reader** — [`kitti_oxts_importer`](src/library/src/types/io/track/kitti_oxts_importer.cpp).
   Parses one `.txt` per frame (30 space-separated fields), validates ranges, skips
   malformed frames without aborting the load, and converts geodetic coordinates to
-  a local **ENU** frame anchored at the first frame via the **Haversine** formula.
+  a **true WGS84 ENU** frame anchored at the first frame (geodetic → ECEF → ENU).
   Exposes position (lat/lon/alt + ENU), velocity (north/east/forward), IMU
   (acceleration + angular rate), and GPS accuracy/quality fields.
 - **KITTI Velodyne reader** — [`kitti_lidar_reader`](src/library/src/types/io/lidar/kitti_lidar_reader.cpp).
@@ -200,11 +239,16 @@ points/frame, and the GPS-trajectory bounding box.
 
 ### Quality & tooling
 
-- **GoogleTest suite** — [`test/`](test/): 39 tests across CRC32, KITTI readers,
-  k-d tree, ground extraction, frame validation, centerline, and map matching.
-- **Google Benchmark harness** — [`bench/`](bench/): 15 benchmarks, including four
-  that run against the **real KITTI sequence** (`*_real`) and skip cleanly when the
-  dataset is absent.
+- **Real KITTI → OSM workflow** — [`tools/kitti_osm_workflow.cpp`](tools/kitti_osm_workflow.cpp).
+  One executable running the complete real pipeline (OXTS → WGS84 ENU → OSM graph →
+  spatial index → nearest-edge baseline → HMM/Viterbi → JSON metrics + Folium CSV
+  export). See [Real KITTI → OSM workflow](#real-kitti--osm-workflow).
+- **GoogleTest suite** — [`test/`](test/): 59 tests across WGS84 coordinates, CRC32,
+  KITTI readers, k-d tree, ground extraction, frame validation, centerline, map
+  matching, and the workflow metrics/report.
+- **Google Benchmark harness** — [`bench/`](bench/): 17 benchmarks, four of which
+  run against the **real KITTI sequence** (`*_real`) and skip cleanly when the
+  dataset is absent; the rest are synthetic/fixture (all labeled in Results).
 - **CI** — [`.github/workflows/ci.yml`](.github/workflows/ci.yml): build, test
   (ctest), benchmarks (JSON artifact), and an AddressSanitizer + UBSan job.
 - **Visualization** — [`python/`](python/): `visualize_map.py` (folium: road
@@ -215,10 +259,15 @@ points/frame, and the GPS-trajectory bounding box.
 
 ## Algorithms & math
 
-**Haversine ENU projection.** With anchor `(lat₀, lon₀, alt₀)` (first frame), a
-point `(lat, lon, alt)` maps to local East/North/Up metres using signed
-great-circle distances, giving a locally-flat tangent frame that GPS, OSM, and
-LiDAR all share.
+**True WGS84 ENU.** With anchor `(lat₀, lon₀, alt₀)` (first OXTS frame), each
+point is transformed geodetic → ECEF → local ENU. ECEF uses the prime-vertical
+radius `N = a / √(1 − e²·sin²φ)`, `x=(N+h)cosφcosλ`, `y=(N+h)cosφsinλ`,
+`z=(N(1−e²)+h)sinφ`; ENU applies the standard rotation about the anchor
+(`e = −sinλ·Δx + cosλ·Δy`, etc.). WGS84 constants: `a = 6378137`,
+`f = 1/298.257223563`, `e² = f(2−f)`. GPS and OSM share one `EnuReferenceFrame`;
+LiDAR does **not** use this frame (it stays in the sensor frame). The inverse
+(ENU → geodetic, Bowring) is used to place snapped points back on lat/lon for
+visualization.
 
 **CRC32 (`0xEDB88320`).** Reflected, table-driven, `constexpr` — `init/xor-out =
 0xFFFFFFFF`. Incremental `update()` is resumable, so a frame's CRC can be computed
@@ -322,6 +371,47 @@ KITTI data to produce results from the 108-frame sequence.
 
 ---
 
+## Real KITTI → OSM workflow
+
+[`tools/kitti_osm_workflow.cpp`](tools/kitti_osm_workflow.cpp) runs the complete
+real workflow end to end and writes a machine-readable report plus visualization
+CSVs. Paths come from CLI args or environment variables — **no machine paths are
+hardcoded** — and the tool **skips cleanly** (exit 0) when the data is absent, so
+CI stays green.
+
+```bash
+cmake -S tools -B build/tools -DCMAKE_BUILD_TYPE=Release
+cmake --build build/tools -j
+
+KITTI_PATH=/path/to/2011_09_26/2011_09_26/2011_09_26_drive_0001_sync \
+OSM_PATH=/path/to/karlsruhe.osm \
+OUTPUT_PATH=workflow_out \
+  ./build/tools/kitti_osm_workflow
+```
+
+Pipeline: real KITTI OXTS → **true WGS84 ENU** (shared anchor) → real OSM road
+graph (same anchor) → spatial index → **nearest-edge baseline** and **HMM/Viterbi**
+(reported **separately**) → `report.json` + Folium CSVs
+(`gps.csv`, `edges.csv`, `matched.csv`, `lowconf.csv`, `disconnected.csv`).
+
+`report.json` contains: sequence name; GPS observation count; matched count and
+percentage; OSM node/edge counts; mean / p50 / p95 / max snap distance;
+low-confidence and disconnected-transition counts; OSM-build, spatial-index,
+nearest-edge, HMM, and total timings; and environment (compiler, build type, CPU,
+commit, dataset paths). Visualize with:
+
+```bash
+python python/visualize_map.py --workflow-dir workflow_out --out map.html
+```
+
+**Status:** the workflow is implemented and unit-tested against deterministic
+fixtures (see [Testing](#testing-sanitizers--ci)). It has **not** been executed on
+a real OSM extract in this environment, so no real snap-distance or matched-rate
+numbers are reported. The comparison of nearest-edge vs. HMM is left to the
+measured output — this README makes **no claim** that HMM is more accurate.
+
+---
+
 ## Results (real KITTI)
 
 Two environments are reported and **kept clearly separate** — never mix them, they
@@ -353,7 +443,10 @@ Full-precision values from the machine-readable JSON run:
 | `ground_extraction_real` | 63.569 frames/s | 15.732 ms | 1699.075 ms | RANSAC; `mean_ground_ratio = 0.6675539843` |
 | `frame_validate_real` | 55.248 frames/s | 18.101 ms | 1954.887 ms | 8-check validator; `pass_count = 108 / total = 108` (100%) |
 
-### Full EC2 console run — all 15 benchmarks (synthetic rows included for context)
+### Full EC2 console run — 15 benchmarks at revision `0e7be08`
+
+(The 2 `coord_*` benchmarks were added later and are **not** in this EC2 run; only
+the 4 `*_real` rows use real KITTI data — the others are synthetic/fixture.)
 
 ```text
 Run on (4 X 3178.99 MHz CPU s)
@@ -383,25 +476,29 @@ kdtree_nn_1k                0.674 ms        0.674 ms          208 items_per_seco
 > Console vs. JSON times differ only by run-to-run CPU-frequency variation; the
 > JSON run is the precise source for the canonical table above.
 
-### What each benchmark measures
+### What each benchmark measures — with data category
 
-| Benchmark | Stage | What it measures |
+Every benchmark is labeled **Real KITTI**, **Synthetic**, or **Fixture/toy graph**.
+
+| Benchmark | Category | What it measures |
 |---|---|---|
-| `kitti_oxts_parse/200` | ingestion | parse a 200-frame synthetic OXTS sequence |
-| `kitti_oxts_parse_real` | ingestion | parse the 108 real OXTS frames |
-| `kitti_lidar_read_1k` | ingestion | read 1000 synthetic Velodyne frames |
-| `kitti_lidar_read_real` | ingestion | read the 108 real Velodyne `.bin` frames |
-| `crc32_1frame` | integrity | CRC32 over one ~120k-point frame (throughput MiB/s) |
-| `ground_extraction_1` | LiDAR | RANSAC ground plane on one synthetic frame |
-| `ground_extraction_real` | LiDAR | RANSAC over all 108 real frames + mean ground ratio |
-| `frame_validate_100` | integrity | 8-check validation ×100 synthetic frames |
-| `frame_validate_real` | integrity | 8-check validation over all 108 real frames + pass rate |
-| `graph_construct_osm` | road graph | build a 30×30 road graph from `.osm` XML |
-| `graph_dijkstra_1k` | routing | 1000 Dijkstra shortest-path queries on a grid graph |
-| `rtree_knn_1k` | spatial | 1000 nearest-edge spatial queries on the road graph |
-| `map_match_sequence` | matching | HMM/Viterbi match of a full GPS sequence |
-| `kdtree_build_100k` | spatial | build a nanoflann k-d tree over 100k points |
-| `kdtree_nn_1k` | spatial | 1000 nearest-neighbour k-d tree queries |
+| `kitti_oxts_parse/200` | Synthetic | parse a 200-frame synthetic OXTS sequence |
+| `kitti_oxts_parse_real` | **Real KITTI** | parse the 108 real OXTS frames |
+| `kitti_lidar_read_1k` | Synthetic | read 1000 synthetic Velodyne frames |
+| `kitti_lidar_read_real` | **Real KITTI** | read the 108 real Velodyne `.bin` frames |
+| `crc32_1frame` | Synthetic | CRC32 over one ~120k-point frame (throughput MiB/s) |
+| `ground_extraction_1` | Synthetic | RANSAC ground plane on one synthetic frame |
+| `ground_extraction_real` | **Real KITTI** | RANSAC over all 108 real frames + mean ground ratio |
+| `frame_validate_100` | Synthetic | 8-check validation ×100 synthetic frames |
+| `frame_validate_real` | **Real KITTI** | 8-check validation over all 108 real frames + pass rate |
+| `graph_construct_osm` | Fixture/toy graph | build a 30×30 grid road graph from generated `.osm` XML |
+| `graph_dijkstra_1k` | Fixture/toy graph | 1000 Dijkstra shortest-path queries on a grid graph |
+| `rtree_knn_1k` | Fixture/toy graph | 1000 nearest-edge spatial queries on the grid road graph |
+| `map_match_sequence` | Synthetic | HMM/Viterbi match of a synthetic GPS sequence |
+| `kdtree_build_100k` | Synthetic | build a nanoflann k-d tree over 100k synthetic points |
+| `kdtree_nn_1k` | Synthetic | 1000 nearest-neighbour k-d tree queries |
+| `coord_geodetic_to_ecef` | Synthetic | WGS84 geodetic→ECEF over 100k points (added after the EC2 run below) |
+| `coord_geodetic_to_enu` | Synthetic | WGS84 geodetic→ENU over 100k points (added after the EC2 run below) |
 
 ### Reference — Local, synthetic data (macOS/clang)
 
@@ -420,26 +517,34 @@ real-data rows.
 | `map_match_sequence` | 0.017 ms |
 | `kdtree_build_100k` | 19.1 ms |
 | `kdtree_nn_1k` | 0.446 ms (2.24M q/s) |
+| `coord_geodetic_to_ecef` | 95.2M conversions/s |
+| `coord_geodetic_to_enu` | 78.9M conversions/s |
 
-**Correctness (both environments):** CRC32 `"123456789"` → `0xCBF43926`; RANSAC
-recovers the planted ground ratio; k-d tree NN of an existing point → distance 0;
-GoogleTest **39/39** pass; AddressSanitizer + UBSan clean.
+**Correctness (both environments):** CRC32 `"123456789"` → `0xCBF43926`; WGS84
+anchor → ENU ≈ (0,0,0) and reference ECEF values match; RANSAC recovers the
+planted ground ratio; k-d tree NN of an existing point → distance 0; GoogleTest
+**59/59** pass; AddressSanitizer + UBSan clean.
 
 ---
 
 ## Testing, sanitizers & CI
 
-- **GoogleTest (39 tests):** valid/malformed OXTS, ENU accuracy, missing-directory
-  handling; Velodyne decode, wrong-size rejection, CRC mismatch detection, NaN
-  detection; CRC32 known vectors; k-d tree build/NN/kNN/radius + empty-cloud edge
-  case; RANSAC planar→100 % and non-planar→low ratio; validator all-pass / CRC-fail
-  / empty / NaN / all-zero-intensity; centerline node/edge/intersection extraction;
-  map matching to expected edges; Dijkstra on a grid; nearest-edge query.
+- **GoogleTest (59 tests):** WGS84 ECEF reference values, anchor→origin,
+  east/north/up sign, geodetic↔ECEF and ENU↔geodetic round-trips, invalid-lat/lon
+  rejection; valid/malformed OXTS, WGS84 ENU accuracy, missing-directory handling;
+  Velodyne decode, wrong-size rejection, CRC mismatch detection, NaN detection;
+  CRC32 known vectors; k-d tree build/NN/kNN/radius + empty-cloud edge case; RANSAC
+  planar→100 % and non-planar→low ratio; validator all-pass / CRC-fail / empty /
+  NaN / all-zero-intensity; centerline node/edge/intersection extraction; map
+  matching to expected edges; Dijkstra on a grid; nearest-edge query; and workflow
+  metrics (shared GPS/OSM frame, nearest-edge match, HMM continuity, snap-distance
+  stats, percentile, JSON report, disconnected-transition detection).
 - **AddressSanitizer + UBSan:** the full suite runs clean under `-fsanitize=
-  address,undefined`.
-- **GitHub Actions:** four jobs — `build`, `test` (ctest), `bench` (JSON artifact
-  upload), and `asan` — on `ubuntu-22.04`. Real-KITTI benchmarks skip on CI (no
-  dataset) by design.
+  address,undefined` (verified on all 59 tests).
+- **GitHub Actions:** jobs for `build`, `test` (ctest), `bench` (JSON artifact
+  upload), `asan`, plus a `workflow` build that runs `kitti_osm_workflow` (skips
+  cleanly without data), on `ubuntu-22.04`. Real-KITTI benchmarks and the
+  real-OSM workflow skip on CI (no dataset) by design.
 
 ---
 
@@ -529,16 +634,19 @@ the dataset.
 ```
 src/library/           Core pipeline library (C++20)
   include/, src/
-    types/io/          KITTI OXTS + Velodyne readers, synchronized sequence store
+    geometry/coordinates/  WGS84 geodetic <-> ECEF <-> ENU transforms
     geometry/          centerline, road_graph, index (k-d tree), lidar
+    types/io/          KITTI OXTS + Velodyne readers, synchronized sequence store
+    workflow/          pipeline_report.hpp (metrics + JSON for the KITTI->OSM run)
     util/              crc32, synthetic-data generators
   ... plus the road-matching engine (network graph, routing, HMM/MDP)
-bench/                 Google Benchmark harness (15 benchmarks)
-test/                  GoogleTest suite (39 tests)
+tools/                 kitti_osm_workflow — real KITTI GPS -> real OSM executable
+bench/                 Google Benchmark harness (17 benchmarks)
+test/                  GoogleTest suite (59 tests)
 python/                folium + matplotlib visualization
 docs/                  MATCHING_ENGINE.md (upstream engine docs)
 third_party/           nanoflann, googletest, benchmark (submodules)
-.github/workflows/     CI (build / test / bench / asan+ubsan)
+.github/workflows/     CI (build / test / bench / asan+ubsan / workflow)
 ```
 
 ---

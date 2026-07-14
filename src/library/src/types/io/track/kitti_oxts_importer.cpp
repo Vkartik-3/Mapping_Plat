@@ -7,6 +7,8 @@
 
 #include "types/io/track/kitti_oxts_importer.hpp"
 
+#include "geometry/coordinates/wgs84.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -74,27 +76,15 @@ namespace map_matching_2::io::track {
     void kitti_oxts_importer::to_enu(double anchor_lat, double anchor_lon, double anchor_alt,
             double lat, double lon, double alt,
             double &easting, double &northing, double &up) {
-        constexpr double deg2rad = M_PI / 180.0;
-
-        const auto haversine = [](double lat1, double lon1, double lat2, double lon2) {
-            const double dlat = (lat2 - lat1) * deg2rad;
-            const double dlon = (lon2 - lon1) * deg2rad;
-            const double a = std::sin(dlat / 2.0) * std::sin(dlat / 2.0) +
-                    std::cos(lat1 * deg2rad) * std::cos(lat2 * deg2rad) *
-                            std::sin(dlon / 2.0) * std::sin(dlon / 2.0);
-            const double c = 2.0 * std::atan2(std::sqrt(a), std::sqrt(1.0 - a));
-            return earth_radius_m * c;
-        };
-
-        // North component: vary latitude only, hold longitude at anchor.
-        northing = haversine(anchor_lat, anchor_lon, lat, anchor_lon);
-        if (lat < anchor_lat) northing = -northing;
-
-        // East component: vary longitude only, hold latitude at anchor.
-        easting = haversine(anchor_lat, anchor_lon, anchor_lat, lon);
-        if (lon < anchor_lon) easting = -easting;
-
-        up = alt - anchor_alt;
+        // True WGS84 ENU: geodetic -> ECEF -> local ENU about the anchor.
+        namespace coord = geometry::coordinates;
+        const coord::EnuReferenceFrame frame{
+                coord::GeodeticCoordinate{anchor_lat, anchor_lon, anchor_alt}};
+        const coord::EnuCoordinate enu = frame.geodeticToEnu(
+                coord::GeodeticCoordinate{lat, lon, alt});
+        easting = enu.east;
+        northing = enu.north;
+        up = enu.up;
     }
 
     KittiOxtsSequence kitti_oxts_importer::load_sequence(

@@ -17,6 +17,7 @@ set(NANOFLANN_INC "${REPO_ROOT}/third_party/nanoflann/include")
 
 # Pipeline sources under test.
 set(PIPELINE_SOURCES
+        ${LIB_SRC}/src/geometry/coordinates/wgs84.cpp
         ${LIB_SRC}/src/types/io/track/kitti_oxts_importer.cpp
         ${LIB_SRC}/src/types/io/lidar/kitti_lidar_reader.cpp
         ${LIB_SRC}/src/geometry/centerline/centerline_extractor.cpp
@@ -35,13 +36,15 @@ add_subdirectory("${REPO_ROOT}/third_party/googletest" googletest-build EXCLUDE_
 enable_testing()
 
 add_executable(hdmap_tests
+        test_coordinates.cpp
         test_crc32.cpp
         test_kitti_reader.cpp
         test_kdtree.cpp
         test_ground_extraction.cpp
         test_frame_validator.cpp
         test_centerline.cpp
-        test_map_matching.cpp)
+        test_map_matching.cpp
+        test_workflow.cpp)
 
 target_link_libraries(hdmap_tests PRIVATE hdmap_pipeline GTest::gtest_main)
 

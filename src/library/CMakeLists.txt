@@ -23,6 +23,7 @@ target_sources(library
         src/geometry/srs.cpp
         src/io/memory_mapped/utils.cpp
         src/io/track/track_exporter.cpp
+        src/geometry/coordinates/wgs84.cpp
         src/types/io/track/kitti_oxts_importer.cpp
         src/types/io/lidar/kitti_lidar_reader.cpp
         src/geometry/centerline/centerline_extractor.cpp

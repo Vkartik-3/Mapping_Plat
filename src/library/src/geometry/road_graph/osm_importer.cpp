@@ -49,10 +49,13 @@ namespace map_matching_2::geometry::road_graph {
     }
 
     void osm_importer::to_enu(double lat, double lon, double &e, double &n) const {
-        constexpr double deg2rad = M_PI / 180.0;
-        n = earth_radius_m * (lat - _params.anchor_lat) * deg2rad;
-        e = earth_radius_m * (lon - _params.anchor_lon) * deg2rad *
-                std::cos(_params.anchor_lat * deg2rad);
+        // True WGS84 ENU about the shared anchor. OSM nodes carry no altitude,
+        // so they are placed at the anchor altitude -> up ~ 0, keeping the road
+        // graph on the anchor's local tangent plane.
+        const geometry::coordinates::EnuCoordinate enu = _frame.geodeticToEnu(
+                geometry::coordinates::GeodeticCoordinate{lat, lon, _params.anchor_alt});
+        e = enu.east;
+        n = enu.north;
     }
 
     RoadGraph osm_importer::import_file(const std::filesystem::path &osm_path) const {

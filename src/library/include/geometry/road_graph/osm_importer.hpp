@@ -21,12 +21,16 @@
 #include <vector>
 
 #include "geometry/road_graph/road_graph.hpp"
+#include "geometry/coordinates/wgs84.hpp"
 
 namespace map_matching_2::geometry::road_graph {
 
     struct OsmImportParams {
+        // ENU anchor. Use the KITTI OXTS sequence anchor so GPS and OSM share
+        // the exact same true-WGS84 ENU frame.
         double anchor_lat = 0.0;
         double anchor_lon = 0.0;
+        double anchor_alt = 0.0;
         // highway=* values to keep. Empty => keep a sensible driving default.
         std::vector<std::string> keep_classes = {
                 "motorway", "trunk", "primary", "secondary", "tertiary",
@@ -36,9 +40,10 @@ namespace map_matching_2::geometry::road_graph {
     class osm_importer {
 
     public:
-        static constexpr double earth_radius_m = 6371000.0;
-
-        explicit osm_importer(OsmImportParams params) : _params(std::move(params)) {}
+        explicit osm_importer(OsmImportParams params)
+            : _params(std::move(params)),
+              _frame(coordinates::GeodeticCoordinate{
+                      _params.anchor_lat, _params.anchor_lon, _params.anchor_alt}) {}
 
         // Parse an .osm XML file into a RoadGraph. Throws std::runtime_error if
         // the file cannot be opened.
@@ -56,6 +61,7 @@ namespace map_matching_2::geometry::road_graph {
         void to_enu(double lat, double lon, double &e, double &n) const;
 
         OsmImportParams _params;
+        coordinates::EnuReferenceFrame _frame;
     };
 
 }

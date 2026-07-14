@@ -50,12 +50,15 @@ TEST(KittiOxts, RejectsOutOfRangeLatLon) {
 }
 
 TEST(KittiOxts, EnuConversionAccuracy) {
-    // ~0.00009 deg latitude north of the anchor should be ~10 m north.
+    // ~0.00009 deg latitude north of the anchor should be ~10 m north. Using
+    // true WGS84 ENU, a purely horizontal displacement dips slightly below the
+    // tangent plane (curvature term ~ d^2/2R ~ 8e-6 m over 10 m), so `up` is
+    // near-zero but not exactly zero — unlike the old flat approximation.
     double e, n, u;
     track::kitti_oxts_importer::to_enu(49.0, 8.4, 116.0, 49.00009, 8.4, 116.0, e, n, u);
     EXPECT_NEAR(e, 0.0, 1e-6);
     EXPECT_NEAR(n, 10.0, 0.05);
-    EXPECT_NEAR(u, 0.0, 1e-9);
+    EXPECT_NEAR(u, 0.0, 1e-3);
 }
 
 TEST(KittiOxts, LoadSequenceSkipsBadFramesAndAnchors) {
